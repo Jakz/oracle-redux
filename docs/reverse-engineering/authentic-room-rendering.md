@@ -82,7 +82,9 @@ Implemented:
 - standard persistent room-flag tile substitutions for flags 0, 1, 2, 3,
   and 7;
 - the Ages past-cliff palette substitution;
-- cross-room composition and a diagnostic fallback.
+- cross-room composition and a diagnostic fallback;
+- complete 16×16 atlases for active small-room groups 0 through 3;
+- lossless `2560×2048` BMP export at a deterministic animation tick.
 
 Not yet applied:
 

@@ -32,9 +32,19 @@ struct RoomPlacement {
     std::int32_t world_y{};
 };
 
+enum class RoomLayoutKind : std::uint8_t {
+    large,
+    small,
+};
+
 class RoomLayoutDecoder {
 public:
     explicit RoomLayoutDecoder(const RomSource& rom);
+
+    [[nodiscard]] std::uint8_t layout_group_count() const;
+
+    [[nodiscard]] RoomLayoutKind layout_kind(
+        std::uint8_t layout_group) const;
 
     [[nodiscard]] RoomLayout decode_small_room(
         std::uint8_t layout_group,

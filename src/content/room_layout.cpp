@@ -9,6 +9,8 @@ namespace {
 constexpr std::size_t ages_room_layout_group_table = 0x10f6c;
 constexpr std::size_t seasons_room_layout_group_table = 0x10c4c;
 constexpr std::size_t layout_group_record_size = 8;
+constexpr std::uint8_t ages_layout_group_count = 6;
+constexpr std::uint8_t seasons_layout_group_count = 7;
 
 std::size_t read_three_byte_pointer(
     const RomSource& rom,
@@ -21,6 +23,29 @@ std::size_t read_three_byte_pointer(
 }  // namespace
 
 RoomLayoutDecoder::RoomLayoutDecoder(const RomSource& rom) : rom_{rom} {}
+
+std::uint8_t RoomLayoutDecoder::layout_group_count() const {
+    return rom_.metadata().campaign == core::Campaign::ages
+        ? ages_layout_group_count
+        : seasons_layout_group_count;
+}
+
+RoomLayoutKind RoomLayoutDecoder::layout_kind(
+    const std::uint8_t layout_group) const {
+    if (layout_group >= layout_group_count()) {
+        throw std::out_of_range{"room layout group is outside cartridge table"};
+    }
+    const auto group_table =
+        rom_.metadata().campaign == core::Campaign::ages
+        ? ages_room_layout_group_table
+        : seasons_room_layout_group_table;
+    const auto group_record =
+        group_table +
+        static_cast<std::size_t>(layout_group) * layout_group_record_size;
+    return rom_.read_byte(group_record) == 1
+        ? RoomLayoutKind::small
+        : RoomLayoutKind::large;
+}
 
 RoomLayout RoomLayoutDecoder::decode_small_room(
     const std::uint8_t layout_group,
@@ -40,7 +65,7 @@ RoomLayout RoomLayoutDecoder::decode_small_room(
         group_table +
         static_cast<std::size_t>(layout_group) * layout_group_record_size;
 
-    if (rom_.read_byte(group_record) != 1) {
+    if (layout_kind(layout_group) != RoomLayoutKind::small) {
         throw std::invalid_argument{
             "the requested layout group contains large dungeon rooms"};
     }

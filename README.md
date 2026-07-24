@@ -93,6 +93,7 @@ The scaffold currently contains:
   attribute, and palette decoding;
 - deterministic cartridge-native background animation advancement;
 - persistent room-flag tile substitutions decoded from both cartridges;
+- all 256 small rooms in world groups 0–3, with full-resolution atlas export;
 - an SDL3 GPU room viewer using authentic ROM-derived 3×3 world regions.
 
 All C++ headers use `.h`; the Python test suite enforces this convention.
@@ -126,6 +127,12 @@ Choose another room by its hexadecimal overworld coordinate:
 build/oracle_room_slice path/to/oracle.gbc --room 91
 ```
 
+Select another active small-room group:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc --group 1 --room 91
+```
+
 For *Seasons*, select the visual season without changing the ROM:
 
 ```sh
@@ -150,6 +157,23 @@ build/oracle_room_slice path/to/oracle.gbc \
 preview and applies the same flags to every visible room; save-file-backed
 per-room state comes in a later simulation milestone.
 
+View all 256 room addresses in one pannable, zoomable atlas:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc --group 0 --atlas
+```
+
+Export the complete `2560×2048` ROM-derived atlas without opening a window:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc \
+  --group 0 --tick 120 --export-atlas build/group0.bmp
+```
+
+Groups `0` through `3` are the small-room address spaces in both campaigns.
+Groups `4` through `7` select large dungeon or side-scrolling layouts, which
+the decoder reports explicitly but does not render yet.
+
 Save one local frame and exit:
 
 ```sh
@@ -165,6 +189,8 @@ The ROM structures and current rendering boundary are documented in
 [`docs/reverse-engineering/authentic-room-rendering.md`](docs/reverse-engineering/authentic-room-rendering.md).
 The staged room-state boundary is cataloged in
 [`docs/reverse-engineering/room-mutation-pipeline.md`](docs/reverse-engineering/room-mutation-pipeline.md).
+The world-group topology and atlas semantics are documented in
+[`docs/reverse-engineering/world-atlas-rendering.md`](docs/reverse-engineering/world-atlas-rendering.md).
 
 Windows developers can instead open the maintained solution at
 [`projects/msvc/oracle-redux.sln`](projects/msvc/oracle-redux.sln).
