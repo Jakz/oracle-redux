@@ -1,0 +1,37 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MSVC = ROOT / "projects" / "msvc"
+
+
+class MsvcProjectTests(unittest.TestCase):
+    def test_solution_keeps_runtime_and_slice_projects(self) -> None:
+        solution = (MSVC / "oracle-redux.sln").read_text(encoding="utf-8")
+        self.assertIn("OracleRoomSlice.vcxproj", solution)
+        self.assertIn("OracleRuntimeTests.vcxproj", solution)
+        self.assertIn(r"..\..\reference\SDL\VisualC\SDL\SDL.vcxproj", solution)
+
+    def test_projects_track_engine_sources_recursively(self) -> None:
+        for name in ("OracleRoomSlice.vcxproj", "OracleRuntimeTests.vcxproj"):
+            with self.subTest(project=name):
+                project = (MSVC / name).read_text(encoding="utf-8")
+                self.assertIn(r'Include="$(OracleRoot)src\**\*.cpp"', project)
+                self.assertIn(
+                    r'Include="$(OracleRoot)include\oracle\**\*.h"',
+                    project,
+                )
+
+    def test_slice_has_default_byo_rom_debug_argument(self) -> None:
+        project = (MSVC / "OracleRoomSlice.vcxproj").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("LocalDebuggerCommandArguments", project)
+        self.assertIn("Oracle of Ages (USA).gbc", project)
+
+
+if __name__ == "__main__":
+    unittest.main()

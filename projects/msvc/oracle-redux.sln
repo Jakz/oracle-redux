@@ -1,0 +1,33 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.36248.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "OracleRoomSlice", "OracleRoomSlice.vcxproj", "{5E226468-B8ED-4DCF-912C-A78C10282C20}"
+EndProject
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "OracleRuntimeTests", "OracleRuntimeTests.vcxproj", "{CF8C0133-C2EE-43A6-83D6-916A8E4C004A}"
+EndProject
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "SDL3", "..\..\reference\SDL\VisualC\SDL\SDL.vcxproj", "{81CE8DAF-EBB2-4761-8E45-B71ABCCA8C68}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5E226468-B8ED-4DCF-912C-A78C10282C20}.Debug|x64.ActiveCfg = Debug|x64
+		{5E226468-B8ED-4DCF-912C-A78C10282C20}.Debug|x64.Build.0 = Debug|x64
+		{5E226468-B8ED-4DCF-912C-A78C10282C20}.Release|x64.ActiveCfg = Release|x64
+		{5E226468-B8ED-4DCF-912C-A78C10282C20}.Release|x64.Build.0 = Release|x64
+		{CF8C0133-C2EE-43A6-83D6-916A8E4C004A}.Debug|x64.ActiveCfg = Debug|x64
+		{CF8C0133-C2EE-43A6-83D6-916A8E4C004A}.Debug|x64.Build.0 = Debug|x64
+		{CF8C0133-C2EE-43A6-83D6-916A8E4C004A}.Release|x64.ActiveCfg = Release|x64
+		{CF8C0133-C2EE-43A6-83D6-916A8E4C004A}.Release|x64.Build.0 = Release|x64
+		{81CE8DAF-EBB2-4761-8E45-B71ABCCA8C68}.Debug|x64.ActiveCfg = Debug|x64
+		{81CE8DAF-EBB2-4761-8E45-B71ABCCA8C68}.Debug|x64.Build.0 = Debug|x64
+		{81CE8DAF-EBB2-4761-8E45-B71ABCCA8C68}.Release|x64.ActiveCfg = Release|x64
+		{81CE8DAF-EBB2-4761-8E45-B71ABCCA8C68}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
