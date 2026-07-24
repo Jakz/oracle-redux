@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "case_id": "item.set-var3c-to-ff.baseline",
+  "scenario": "Set a non-FF item.var3c value to FF.",
+  "routine": {
+    "name": "itemSetVar3cToFF",
+    "source": "object_code/common/items/commonCode1.s",
+    "locations": {
+      "ages": "07:49C2",
+      "seasons": "07:49AA"
+    }
+  },
+  "expected_relation": "identical",
+  "observations": [
+    {
+      "campaign": "ages",
+      "rom_sha256": "0b56b78a9e45452e98c33edd111234931f1e034dc097f6f23082eb8db6055474",
+      "routine_location": "07:49C2",
+      "capture_status": "planned"
+    },
+    {
+      "campaign": "seasons",
+      "rom_sha256": "862a51368fb30539279d336b3fe193b43876d2cb15c87a36f5da517804ab3971",
+      "routine_location": "07:49AA",
+      "capture_status": "planned"
+    }
+  ],
+  "notes": [
+    "First trace-pipeline smoke test.",
+    "Expected canonical delta: item.var3c -> 255."
+  ]
+}

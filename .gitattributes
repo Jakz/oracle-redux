@@ -1,0 +1,17 @@
+* text=auto
+
+.gitattributes text eol=lf
+.gitignore text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.py text eol=lf
+*.props text eol=crlf
+*.sln text eol=crlf
+*.vcxproj text eol=crlf
+
+*.gb binary
+*.gbc binary
+*.bmp binary
+*.png binary

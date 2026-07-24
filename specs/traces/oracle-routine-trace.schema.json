@@ -1,0 +1,333 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/oracle-routine-trace.schema.json",
+  "title": "Oracle routine behavioral trace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "case_id",
+    "routine",
+    "expected_relation",
+    "observations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "case_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "scenario": {
+      "type": "string",
+      "minLength": 1
+    },
+    "routine": {
+      "$ref": "#/$defs/routine"
+    },
+    "expected_relation": {
+      "enum": [
+        "identical",
+        "campaign-policy",
+        "single-campaign"
+      ]
+    },
+    "policy_hook": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "routine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "source",
+        "locations"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "locations": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ages": {
+              "$ref": "#/$defs/location"
+            },
+            "seasons": {
+              "$ref": "#/$defs/location"
+            }
+          },
+          "minProperties": 1
+        }
+      }
+    },
+    "location": {
+      "type": "string",
+      "pattern": "^[0-9A-F]{2}:[0-9A-F]{4}$"
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "campaign",
+        "rom_sha256",
+        "routine_location",
+        "capture_status"
+      ],
+      "properties": {
+        "campaign": {
+          "enum": [
+            "ages",
+            "seasons"
+          ]
+        },
+        "rom_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "routine_location": {
+          "$ref": "#/$defs/location"
+        },
+        "capture_status": {
+          "enum": [
+            "planned",
+            "captured",
+            "verified"
+          ]
+        },
+        "entry": {
+          "$ref": "#/$defs/snapshot"
+        },
+        "result": {
+          "$ref": "#/$defs/result"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "capture_status": {
+                "enum": [
+                  "captured",
+                  "verified"
+                ]
+              }
+            },
+            "required": [
+              "capture_status"
+            ]
+          },
+          "then": {
+            "required": [
+              "entry",
+              "result"
+            ]
+          }
+        }
+      ]
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registers",
+        "state"
+      ],
+      "properties": {
+        "registers": {
+          "$ref": "#/$defs/registers"
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "memory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/memoryRegion"
+          }
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registers",
+        "state_deltas",
+        "events"
+      ],
+      "properties": {
+        "registers": {
+          "$ref": "#/$defs/registers"
+        },
+        "state_deltas": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stateDelta"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/event"
+          }
+        }
+      }
+    },
+    "registers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "$ref": "#/$defs/byte"
+        },
+        "b": {
+          "$ref": "#/$defs/byte"
+        },
+        "c": {
+          "$ref": "#/$defs/byte"
+        },
+        "d": {
+          "$ref": "#/$defs/byte"
+        },
+        "e": {
+          "$ref": "#/$defs/byte"
+        },
+        "h": {
+          "$ref": "#/$defs/byte"
+        },
+        "l": {
+          "$ref": "#/$defs/byte"
+        },
+        "f": {
+          "$ref": "#/$defs/byte"
+        },
+        "sp": {
+          "$ref": "#/$defs/word"
+        },
+        "pc": {
+          "$ref": "#/$defs/word"
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/scalar"
+      }
+    },
+    "stateDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "before",
+        "after"
+      ],
+      "properties": {
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "before": {
+          "$ref": "#/$defs/scalar"
+        },
+        "after": {
+          "$ref": "#/$defs/scalar"
+        }
+      }
+    },
+    "memoryRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol",
+        "bytes"
+      ],
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes": {
+          "type": "string",
+          "pattern": "^(?:[0-9A-F]{2})+$"
+        }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "animation",
+            "collision-query",
+            "delete",
+            "graphics-reference",
+            "hazard",
+            "sound",
+            "spawn",
+            "tile-query"
+          ]
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/scalar"
+          }
+        }
+      }
+    },
+    "scalar": {
+      "type": [
+        "boolean",
+        "integer",
+        "null",
+        "string"
+      ]
+    },
+    "byte": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
+    },
+    "word": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    }
+  }
+}

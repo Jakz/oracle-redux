@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "case_id": "item-parent.animation.ages-underwater",
+  "scenario": "Base parent-item animation is LINK_ANIM_MODE_22 while Link is underwater.",
+  "routine": {
+    "name": "parentItemLoadAnimationAndIncState",
+    "source": "object_code/common/itemParents/commonCode.s",
+    "locations": {
+      "ages": "06:5378",
+      "seasons": "06:52E2"
+    }
+  },
+  "expected_relation": "campaign-policy",
+  "policy_hook": "select_parent_item_animation",
+  "observations": [
+    {
+      "campaign": "ages",
+      "rom_sha256": "0b56b78a9e45452e98c33edd111234931f1e034dc097f6f23082eb8db6055474",
+      "routine_location": "06:5378",
+      "capture_status": "planned"
+    },
+    {
+      "campaign": "seasons",
+      "rom_sha256": "862a51368fb30539279d336b3fe193b43876d2cb15c87a36f5da517804ab3971",
+      "routine_location": "06:52E2",
+      "capture_status": "planned"
+    }
+  ],
+  "notes": [
+    "Ages is expected to replace animation mode 22 with mode 2D.",
+    "Also capture a separate raft scenario before finalizing the policy truth table."
+  ]
+}
