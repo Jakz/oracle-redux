@@ -8,6 +8,7 @@
 
 #include "oracle/core/simulation_region.h"
 #include "oracle/content/room_layout.h"
+#include "oracle/content/room_pixels.h"
 #include "oracle/experience_settings.h"
 #include "oracle/core/item_campaign_policy.h"
 #include "oracle/core/item_runtime.h"
@@ -306,6 +307,58 @@ void test_room_layout_decompression() {
         "mode-two ROM room repetitions decode exactly");
 }
 
+void test_graphics_decompression() {
+    using oracle::content::RoomPixelDecoder;
+
+    const std::array<std::uint8_t, 5> raw{1, 2, 3, 4, 5};
+    check(
+        RoomPixelDecoder::decompress_graphics(raw, raw.size(), 0) ==
+            std::vector<std::uint8_t>{raw.begin(), raw.end()},
+        "graphics mode zero copies raw cartridge bytes");
+
+    const std::array<std::uint8_t, 5> mode_one_literals{
+        0x00,
+        0x11,
+        0x22,
+        0x33,
+        0x44,
+    };
+    check(
+        RoomPixelDecoder::decompress_graphics(
+            mode_one_literals,
+            4,
+            1) ==
+            std::vector<std::uint8_t>{0x11, 0x22, 0x33, 0x44},
+        "graphics mode one decodes literal control bits");
+
+    const std::array<std::uint8_t, 4> mode_one_reference{
+        0x20,
+        static_cast<std::uint8_t>('A'),
+        static_cast<std::uint8_t>('B'),
+        0x61,
+    };
+    check(
+        RoomPixelDecoder::decompress_graphics(
+            mode_one_reference,
+            6,
+            1) ==
+            std::vector<std::uint8_t>{'A', 'B', 'A', 'B', 'A', 'B'},
+        "graphics mode one expands overlapping back references");
+
+    const std::array<std::uint8_t, 3> mode_two_repeated{
+        0xff,
+        0xff,
+        0x7a,
+    };
+    check(
+        RoomPixelDecoder::decompress_graphics(
+            mode_two_repeated,
+            16,
+            2) ==
+            std::vector<std::uint8_t>(16, 0x7a),
+        "graphics mode two expands its repeated-byte mask");
+}
+
 }  // namespace
 
 int main() {
@@ -314,6 +367,7 @@ int main() {
     test_presentation_camera();
     test_experience_profiles();
     test_room_layout_decompression();
+    test_graphics_decompression();
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
         return EXIT_FAILURE;

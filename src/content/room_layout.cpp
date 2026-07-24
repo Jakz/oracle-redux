@@ -25,6 +25,13 @@ RoomLayoutDecoder::RoomLayoutDecoder(const RomSource& rom) : rom_{rom} {}
 RoomLayout RoomLayoutDecoder::decode_small_room(
     const std::uint8_t layout_group,
     const std::uint8_t room) const {
+    return decode_small_room(layout_group, layout_group, room);
+}
+
+RoomLayout RoomLayoutDecoder::decode_small_room(
+    const std::uint8_t world_group,
+    const std::uint8_t layout_group,
+    const std::uint8_t room) const {
     const auto group_table =
         rom_.metadata().campaign == core::Campaign::ages
         ? ages_room_layout_group_table
@@ -54,7 +61,7 @@ RoomLayout RoomLayoutDecoder::decode_small_room(
     return RoomLayout{
         .id =
             core::WorldRoomId{
-                .area = layout_group,
+                .area = world_group,
                 .room = room,
             },
         .metatiles =

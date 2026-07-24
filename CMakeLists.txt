@@ -32,6 +32,7 @@ target_link_libraries(oracle_core PUBLIC oracle_experience)
 add_library(oracle_content
     src/content/rom_source.cpp
     src/content/room_layout.cpp
+    src/content/room_pixels.cpp
 )
 target_include_directories(oracle_content PUBLIC include)
 target_compile_features(oracle_content PUBLIC cxx_std_20)

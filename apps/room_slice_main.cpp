@@ -20,6 +20,7 @@
 
 #include "oracle/content/rom_source.h"
 #include "oracle/content/room_layout.h"
+#include "oracle/content/room_pixels.h"
 #include "oracle/core/campaign.h"
 #include "oracle/presentation/frame_timing.h"
 
@@ -39,6 +40,15 @@ struct Color {
     std::uint8_t blue{};
 };
 
+struct RegionPixels {
+    std::int32_t world_x{};
+    std::int32_t world_y{};
+    std::int32_t width{};
+    std::int32_t height{};
+    std::vector<oracle::content::RgbaPixel> pixels;
+    std::vector<oracle::content::RenderedRoom> rooms;
+};
+
 std::uint8_t parse_hex_byte(const std::string_view text) {
     auto normalized = text;
     if (normalized.starts_with("0x") || normalized.starts_with("0X")) {
@@ -55,6 +65,24 @@ std::uint8_t parse_hex_byte(const std::string_view text) {
         throw std::invalid_argument{"room must be a hexadecimal byte"};
     }
     return static_cast<std::uint8_t>(value);
+}
+
+oracle::content::Season parse_season(const std::string_view text) {
+    using oracle::content::Season;
+    if (text == "spring" || text == "0") {
+        return Season::spring;
+    }
+    if (text == "summer" || text == "1") {
+        return Season::summer;
+    }
+    if (text == "autumn" || text == "fall" || text == "2") {
+        return Season::autumn;
+    }
+    if (text == "winter" || text == "3") {
+        return Season::winter;
+    }
+    throw std::invalid_argument{
+        "season must be spring, summer, autumn, or winter"};
 }
 
 Color metatile_color(
@@ -83,7 +111,7 @@ void set_color(SDL_Renderer* renderer, const Color color) {
         SDL_ALPHA_OPAQUE);
 }
 
-void render_region(
+void render_diagnostic_region(
     SDL_Renderer* renderer,
     const std::vector<RoomPlacement>& rooms,
     const oracle::core::Campaign campaign,
@@ -171,6 +199,139 @@ void render_region(
     }
 }
 
+void render_room_borders(
+    SDL_Renderer* renderer,
+    const std::vector<RoomPlacement>& rooms,
+    const CameraState camera,
+    const int output_width,
+    const int output_height,
+    const std::uint8_t center_room) {
+    const auto to_screen_x = [&](const double world_x) {
+        return static_cast<float>(
+            (world_x - camera.x) * camera.zoom + output_width * 0.5);
+    };
+    const auto to_screen_y = [&](const double world_y) {
+        return static_cast<float>(
+            (world_y - camera.y) * camera.zoom + output_height * 0.5);
+    };
+    for (const auto& placement : rooms) {
+        const bool is_center = placement.layout.id.room == center_room;
+        set_color(
+            renderer,
+            is_center ? Color{255, 238, 128} : Color{24, 28, 36});
+        const SDL_FRect border{
+            .x = to_screen_x(placement.world_x),
+            .y = to_screen_y(placement.world_y),
+            .w = static_cast<float>(
+                oracle::content::small_room_world_width * camera.zoom),
+            .h = static_cast<float>(
+                oracle::content::small_room_world_height * camera.zoom),
+        };
+        SDL_RenderRect(renderer, &border);
+    }
+}
+
+RegionPixels compose_region(
+    const oracle::content::RoomPixelDecoder& decoder,
+    const std::vector<RoomPlacement>& placements,
+    const oracle::content::Season season) {
+    if (placements.empty()) {
+        throw std::invalid_argument{"cannot compose an empty room region"};
+    }
+    const auto x_bounds = std::minmax_element(
+        placements.begin(),
+        placements.end(),
+        [](const RoomPlacement& left, const RoomPlacement& right) {
+            return left.world_x < right.world_x;
+        });
+    const auto y_bounds = std::minmax_element(
+        placements.begin(),
+        placements.end(),
+        [](const RoomPlacement& left, const RoomPlacement& right) {
+            return left.world_y < right.world_y;
+        });
+    RegionPixels region{
+        .world_x = x_bounds.first->world_x,
+        .world_y = y_bounds.first->world_y,
+        .width =
+            x_bounds.second->world_x - x_bounds.first->world_x +
+            oracle::content::small_room_world_width,
+        .height =
+            y_bounds.second->world_y - y_bounds.first->world_y +
+            oracle::content::small_room_world_height,
+    };
+    region.pixels.resize(
+        static_cast<std::size_t>(region.width * region.height));
+    region.rooms.reserve(placements.size());
+
+    for (const auto& placement : placements) {
+        auto rendered = decoder.render(placement.layout, season);
+        const auto local_x = placement.world_x - region.world_x;
+        const auto local_y = placement.world_y - region.world_y;
+        for (std::int32_t y = 0;
+             y < oracle::content::small_room_world_height;
+             ++y) {
+            const auto source =
+                rendered.pixels.begin() +
+                static_cast<std::ptrdiff_t>(
+                    y * oracle::content::small_room_world_width);
+            const auto destination =
+                region.pixels.begin() +
+                static_cast<std::ptrdiff_t>(
+                    (local_y + y) * region.width + local_x);
+            std::copy_n(
+                source,
+                oracle::content::small_room_world_width,
+                destination);
+        }
+        region.rooms.push_back(std::move(rendered));
+    }
+    return region;
+}
+
+std::vector<RoomPlacement> decode_world_neighborhood(
+    const oracle::content::RoomLayoutDecoder& layout_decoder,
+    const oracle::content::RoomPixelDecoder& pixel_decoder,
+    const std::uint8_t world_group,
+    const std::uint8_t center_room,
+    const std::uint8_t radius,
+    const oracle::content::Season season) {
+    const auto center_x = static_cast<int>(center_room & 0x0f);
+    const auto center_y = static_cast<int>(center_room >> 4u);
+    const auto extent = static_cast<int>(radius);
+    std::vector<RoomPlacement> rooms;
+    rooms.reserve(
+        static_cast<std::size_t>((extent * 2 + 1) * (extent * 2 + 1)));
+    for (int y = center_y - extent; y <= center_y + extent; ++y) {
+        if (y < 0 || y > 15) {
+            continue;
+        }
+        for (int x = center_x - extent; x <= center_x + extent; ++x) {
+            if (x < 0 || x > 15) {
+                continue;
+            }
+            const auto room =
+                static_cast<std::uint8_t>((y << 4) | x);
+            const auto tileset =
+                pixel_decoder.describe_tileset(
+                    world_group,
+                    room,
+                    season);
+            rooms.push_back(RoomPlacement{
+                .layout = layout_decoder.decode_small_room(
+                    world_group,
+                    tileset.layout_group,
+                    room),
+                .world_x =
+                    x * oracle::content::small_room_world_width,
+                .world_y =
+                    y * oracle::content::small_room_world_height,
+            });
+        }
+    }
+    return rooms;
+}
+
 std::string campaign_name(const oracle::core::Campaign campaign) {
     return campaign == oracle::core::Campaign::ages ? "Ages" : "Seasons";
 }
@@ -178,7 +339,8 @@ std::string campaign_name(const oracle::core::Campaign campaign) {
 void print_description(
     const oracle::content::RomSource& rom,
     const std::vector<RoomPlacement>& rooms,
-    const std::uint8_t center_room) {
+    const std::uint8_t center_room,
+    const RegionPixels* authentic_region) {
     std::unordered_set<std::uint8_t> metatiles;
     for (const auto& room : rooms) {
         metatiles.insert(
@@ -195,13 +357,44 @@ void print_description(
         << static_cast<unsigned int>(center_room) << '\n'
         << std::dec
         << "decoded_rooms=" << rooms.size() << '\n'
-        << "unique_metatiles=" << metatiles.size() << '\n';
+        << "unique_metatiles=" << metatiles.size() << '\n'
+        << "render_mode="
+        << (authentic_region != nullptr ? "authentic-rom" : "diagnostic")
+        << '\n';
+    if (authentic_region != nullptr) {
+        const auto center = std::find_if(
+            authentic_region->rooms.begin(),
+            authentic_region->rooms.end(),
+            [center_room](const oracle::content::RenderedRoom& room) {
+                return room.id.room == center_room;
+            });
+        if (center != authentic_region->rooms.end()) {
+            std::cout
+                << "tileset_index=" << std::hex << std::setw(2)
+                << static_cast<unsigned int>(center->tileset.index) << '\n'
+                << "mapping_index=" << std::setw(2)
+                << static_cast<unsigned int>(center->tileset.mapping) << '\n'
+                << "main_gfx_header=" << std::setw(2)
+                << static_cast<unsigned int>(
+                       center->tileset.main_graphics)
+                << '\n'
+                << "unique_gfx_header=" << std::setw(2)
+                << static_cast<unsigned int>(
+                       center->tileset.unique_graphics)
+                << '\n'
+                << "palette_header=" << std::setw(2)
+                << static_cast<unsigned int>(center->tileset.palette)
+                << std::dec << '\n';
+        }
+    }
 }
 
 int run_window(
     const oracle::content::RomSource& rom,
     const std::vector<RoomPlacement>& rooms,
+    const RegionPixels* authentic_region,
     const std::uint8_t center_room,
+    const bool force_diagnostic,
     std::optional<std::filesystem::path> screenshot_path) {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         throw std::runtime_error{
@@ -242,6 +435,33 @@ int run_window(
     }
     SDL_SetRenderVSync(renderer, 1);
 
+    SDL_Texture* region_texture = nullptr;
+    if (authentic_region != nullptr) {
+        region_texture = SDL_CreateTexture(
+            renderer,
+            SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STATIC,
+            authentic_region->width,
+            authentic_region->height);
+        if (region_texture == nullptr) {
+            throw std::runtime_error{
+                std::string{"room texture creation failed: "} +
+                SDL_GetError()};
+        }
+        if (!SDL_UpdateTexture(
+                region_texture,
+                nullptr,
+                authentic_region->pixels.data(),
+                authentic_region->width *
+                    static_cast<int>(
+                        sizeof(oracle::content::RgbaPixel)))) {
+            throw std::runtime_error{
+                std::string{"room texture upload failed: "} +
+                SDL_GetError()};
+        }
+        SDL_SetTextureScaleMode(region_texture, SDL_SCALEMODE_NEAREST);
+    }
+
     std::ostringstream title;
     title << "Oracle of " << campaign_name(rom.metadata().campaign)
           << " - ROM Room Slice - SDL3 GPU";
@@ -263,6 +483,8 @@ int run_window(
     const auto counter_frequency =
         static_cast<double>(SDL_GetPerformanceFrequency());
     bool running = true;
+    bool diagnostic =
+        force_diagnostic || authentic_region == nullptr;
 
     while (running) {
         SDL_Event event{};
@@ -282,6 +504,11 @@ int run_window(
                     .zoom = 3.0,
                 };
                 current = previous;
+            } else if (
+                event.type == SDL_EVENT_KEY_DOWN &&
+                event.key.key == SDLK_F1 &&
+                authentic_region != nullptr) {
+                diagnostic = !diagnostic;
             } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
                 current.zoom = std::clamp(
                     current.zoom * std::pow(1.15, event.wheel.y),
@@ -333,14 +560,43 @@ int run_window(
         SDL_GetRenderOutputSize(renderer, &output_width, &output_height);
         SDL_SetRenderDrawColor(renderer, 12, 16, 24, SDL_ALPHA_OPAQUE);
         SDL_RenderClear(renderer);
-        render_region(
-            renderer,
-            rooms,
-            rom.metadata().campaign,
-            render_camera,
-            output_width,
-            output_height,
-            center_room);
+        if (diagnostic) {
+            render_diagnostic_region(
+                renderer,
+                rooms,
+                rom.metadata().campaign,
+                render_camera,
+                output_width,
+                output_height,
+                center_room);
+        } else {
+            const SDL_FRect destination{
+                .x = static_cast<float>(
+                    (authentic_region->world_x - render_camera.x) *
+                        render_camera.zoom +
+                    output_width * 0.5),
+                .y = static_cast<float>(
+                    (authentic_region->world_y - render_camera.y) *
+                        render_camera.zoom +
+                    output_height * 0.5),
+                .w = static_cast<float>(
+                    authentic_region->width * render_camera.zoom),
+                .h = static_cast<float>(
+                    authentic_region->height * render_camera.zoom),
+            };
+            SDL_RenderTexture(
+                renderer,
+                region_texture,
+                nullptr,
+                &destination);
+            render_room_borders(
+                renderer,
+                rooms,
+                render_camera,
+                output_width,
+                output_height,
+                center_room);
+        }
 
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(renderer, 8, 10, 18, 210);
@@ -348,9 +604,11 @@ int run_window(
         SDL_RenderFillRect(renderer, &panel);
         SDL_SetRenderDrawColor(renderer, 232, 238, 248, SDL_ALPHA_OPAQUE);
         const std::string line_one =
-            "ROM-derived 3x3 room region | WASD/arrows: pan | wheel: zoom";
+            "Authentic ROM pixels | WASD/arrows: pan | wheel: zoom";
         const std::string line_two =
-            "R: reset | gold border: selected room | renderer: SDL3 GPU";
+            diagnostic
+            ? "F1: authentic view | R: reset | mode: diagnostic"
+            : "F1: diagnostic view | R: reset | mode: authentic";
         SDL_RenderDebugText(renderer, 22.0f, 23.0f, line_one.c_str());
         SDL_RenderDebugText(renderer, 22.0f, 43.0f, line_two.c_str());
         if (screenshot_path.has_value()) {
@@ -374,6 +632,7 @@ int run_window(
         SDL_RenderPresent(renderer);
     }
 
+    SDL_DestroyTexture(region_texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyGPUDevice(gpu_device);
     SDL_DestroyWindow(window);
@@ -388,20 +647,27 @@ int main(int argc, char* argv[]) {
         if (argc < 2) {
             std::cerr
                 << "Usage: oracle_room_slice <US ROM path> "
-                   "[--room HEX] [--describe] [--screenshot PATH]\n";
+                   "[--room HEX] [--season NAME] [--diagnostic] "
+                   "[--describe] [--screenshot PATH]\n";
             return EXIT_FAILURE;
         }
 
         const std::filesystem::path rom_path{argv[1]};
         std::uint8_t center_room = 0x91;
         bool describe_only = false;
+        bool force_diagnostic = false;
+        auto season = oracle::content::Season::spring;
         std::optional<std::filesystem::path> screenshot_path;
         for (int index = 2; index < argc; ++index) {
             const std::string_view argument{argv[index]};
             if (argument == "--describe") {
                 describe_only = true;
+            } else if (argument == "--diagnostic") {
+                force_diagnostic = true;
             } else if (argument == "--room" && index + 1 < argc) {
                 center_room = parse_hex_byte(argv[++index]);
+            } else if (argument == "--season" && index + 1 < argc) {
+                season = parse_season(argv[++index]);
             } else if (argument == "--screenshot" && index + 1 < argc) {
                 screenshot_path = std::filesystem::path{argv[++index]};
             } else {
@@ -411,13 +677,42 @@ int main(int argc, char* argv[]) {
         }
 
         const auto rom = oracle::content::RomSource::load(rom_path);
-        const oracle::content::RoomLayoutDecoder decoder{rom};
-        const auto rooms = decoder.decode_neighborhood(0, center_room, 1);
-        print_description(rom, rooms, center_room);
+        const oracle::content::RoomLayoutDecoder layout_decoder{rom};
+        const oracle::content::RoomPixelDecoder pixel_decoder{rom};
+        const auto rooms = decode_world_neighborhood(
+            layout_decoder,
+            pixel_decoder,
+            0,
+            center_room,
+            1,
+            season);
+        std::optional<RegionPixels> authentic_region;
+        if (!force_diagnostic) {
+            try {
+                authentic_region =
+                    compose_region(pixel_decoder, rooms, season);
+            } catch (const std::exception& error) {
+                std::cerr
+                    << "authentic renderer unavailable; using diagnostic "
+                       "fallback: "
+                    << error.what() << '\n';
+            }
+        }
+        print_description(
+            rom,
+            rooms,
+            center_room,
+            authentic_region ? &*authentic_region : nullptr);
         if (describe_only) {
             return EXIT_SUCCESS;
         }
-        return run_window(rom, rooms, center_room, screenshot_path);
+        return run_window(
+            rom,
+            rooms,
+            authentic_region ? &*authentic_region : nullptr,
+            center_room,
+            force_diagnostic,
+            screenshot_path);
     } catch (const std::exception& error) {
         std::cerr << "oracle_room_slice: " << error.what() << '\n';
         return EXIT_FAILURE;

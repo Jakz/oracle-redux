@@ -40,6 +40,11 @@ public:
         std::uint8_t layout_group,
         std::uint8_t room) const;
 
+    [[nodiscard]] RoomLayout decode_small_room(
+        std::uint8_t world_group,
+        std::uint8_t layout_group,
+        std::uint8_t room) const;
+
     [[nodiscard]] std::vector<RoomPlacement> decode_neighborhood(
         std::uint8_t layout_group,
         std::uint8_t center_room,

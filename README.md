@@ -89,7 +89,9 @@ The scaffold currently contains:
 - high-refresh render interpolation over deterministic logic ticks;
 - backend-independent lighting, fog, grading, and interface render passes.
 - exact US ROM validation and small-room layout decompression;
-- an SDL3 GPU room viewer using ROM-derived 3×3 world regions.
+- cartridge-native tileset assignment, metatile, graphics, animation-frame,
+  attribute, and palette decoding;
+- an SDL3 GPU room viewer using authentic ROM-derived 3×3 world regions.
 
 All C++ headers use `.h`; the Python test suite enforces this convention.
 The item implementations are source-faithful scaffolding, but remain
@@ -113,6 +115,7 @@ Controls:
 - `WASD` or arrow keys pan across room seams;
 - the mouse wheel zooms between overview and close-up scales;
 - `R` resets the camera;
+- `F1` switches between authentic pixels and the metatile diagnostic view;
 - `Escape` exits.
 
 Choose another room by its hexadecimal overworld coordinate:
@@ -121,24 +124,31 @@ Choose another room by its hexadecimal overworld coordinate:
 build/oracle_room_slice path/to/oracle.gbc --room 91
 ```
 
+For *Seasons*, select the visual season without changing the ROM:
+
+```sh
+build/oracle_room_slice path/to/seasons.gbc --room 91 --season winter
+```
+
 Validate and decode without opening a window:
 
 ```sh
 build/oracle_room_slice path/to/oracle.gbc --room 91 --describe
 ```
 
-Save one local diagnostic frame and exit:
+Save one local frame and exit:
 
 ```sh
 build/oracle_room_slice path/to/oracle.gbc \
   --room 91 --screenshot build/room-slice.bmp
 ```
 
-The current picture uses deterministic colors for decoded metatile identifiers.
-It validates ROM loading, room decompression, continuous world placement,
-widescreen camera composition, fixed-tick interpolation, and the SDL3 GPU
-path. Decoding the metatile mappings, original tile pixels, attributes, and
-palettes is the next visual layer.
+Authentic rendering is the default. `--diagnostic` starts with deterministic
+metatile colors instead. The cartridge is decoded in memory at runtime; the
+repository and executable contain no extracted Nintendo graphics.
+
+The ROM structures and current rendering boundary are documented in
+[`docs/reverse-engineering/authentic-room-rendering.md`](docs/reverse-engineering/authentic-room-rendering.md).
 
 Windows developers can instead open the maintained solution at
 [`projects/msvc/oracle-redux.sln`](projects/msvc/oracle-redux.sln).
