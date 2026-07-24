@@ -5,6 +5,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 namespace oracle::content {
 namespace {
@@ -36,6 +37,8 @@ constexpr std::size_t graphics_header_entry_size = 6;
 constexpr std::size_t vram_size = 0x2000;
 constexpr std::size_t tile_bytes = 16;
 constexpr std::size_t metatile_count = 256;
+constexpr std::uint64_t signature_offset_basis = 14695981039346656037ull;
+constexpr std::uint64_t signature_prime = 1099511628211ull;
 
 struct CampaignOffsets {
     std::size_t tileset_assignments{};
@@ -54,6 +57,12 @@ struct CampaignOffsets {
 struct MetatileMapping {
     std::array<std::uint8_t, 4> tile_indices{};
     std::array<std::uint8_t, 4> attributes{};
+};
+
+struct AnimationSequenceState {
+    std::uint8_t counter{};
+    std::size_t pointer{};
+    std::uint8_t graphics_index{};
 };
 
 using MetatileMappings = std::array<MetatileMapping, metatile_count>;
@@ -327,13 +336,85 @@ void load_graphics_header(
     } while (repeat);
 }
 
-void load_initial_animation_frames(
+void advance_animation_sequence(
+    const RomSource& rom,
+    AnimationSequenceState& state) {
+    state.graphics_index = rom.read_byte(state.pointer++);
+    const auto next = rom.read_byte(state.pointer++);
+    if (next != 0xff) {
+        state.counter = next;
+        return;
+    }
+
+    const auto encoded_offset = rom.read_byte(state.pointer);
+    const auto signed_offset = static_cast<std::int16_t>(
+        0xff00u | encoded_offset);
+    const auto target =
+        static_cast<std::int64_t>(state.pointer) + signed_offset;
+    if (target < 0) {
+        throw std::runtime_error{
+            "animation loop points before the cartridge"};
+    }
+    state.pointer = static_cast<std::size_t>(target);
+    state.counter = rom.read_byte(state.pointer++);
+}
+
+std::uint64_t animation_state_key(
+    const AnimationSequenceState state) {
+    return
+        (static_cast<std::uint64_t>(state.pointer) << 16u) |
+        (static_cast<std::uint64_t>(state.counter) << 8u) |
+        state.graphics_index;
+}
+
+std::uint8_t animation_graphics_at_tick(
+    const RomSource& rom,
+    const std::size_t sequence,
+    const core::Campaign campaign,
+    std::uint64_t tick) {
+    AnimationSequenceState state{
+        .counter = rom.read_byte(sequence),
+        .pointer = sequence + 1,
+    };
+    const auto startup_advances =
+        campaign == core::Campaign::ages ? 3 : 1;
+    for (int advance = 0; advance < startup_advances; ++advance) {
+        advance_animation_sequence(rom, state);
+    }
+
+    std::unordered_map<std::uint64_t, std::uint64_t> seen;
+    std::uint64_t elapsed = 0;
+    while (elapsed < tick) {
+        const auto [position, inserted] =
+            seen.emplace(animation_state_key(state), elapsed);
+        if (!inserted) {
+            const auto cycle_length = elapsed - position->second;
+            if (cycle_length != 0) {
+                const auto cycles = (tick - elapsed) / cycle_length;
+                if (cycles != 0) {
+                    elapsed += cycles * cycle_length;
+                    continue;
+                }
+            }
+        }
+
+        state.counter = static_cast<std::uint8_t>(state.counter - 1);
+        if (state.counter == 0) {
+            advance_animation_sequence(rom, state);
+        }
+        ++elapsed;
+    }
+    return state.graphics_index;
+}
+
+std::uint64_t collect_animation_frames(
     const RomSource& rom,
     const CampaignOffsets offsets,
     const std::uint8_t group_index,
-    Vram& vram) {
+    const std::uint64_t animation_tick,
+    Vram* vram) {
     if (group_index == 0xff) {
-        return;
+        return signature_offset_basis;
     }
     const auto group =
         rom.banked_file_offset(
@@ -342,8 +423,7 @@ void load_initial_animation_frames(
                 offsets.animation_group_table +
                 static_cast<std::size_t>(group_index) * 2));
     const auto state = rom.read_byte(group);
-    const std::size_t initial_frame =
-        rom.metadata().campaign == core::Campaign::ages ? 2 : 0;
+    auto signature = signature_offset_basis;
     for (std::size_t slot = 0; slot < 4; ++slot) {
         if ((state & (1u << slot)) == 0) {
             continue;
@@ -353,13 +433,24 @@ void load_initial_animation_frames(
                 4,
                 rom.read_little_u16(group + 1 + slot * 2));
         const auto graphics_index =
-            rom.read_byte(animation + initial_frame * 2 + 1);
-        const auto graphics_entry =
-            offsets.animation_graphics_headers +
-            static_cast<std::size_t>(graphics_index) *
-                graphics_header_entry_size;
-        load_graphics_entry(rom, graphics_entry, vram);
+            animation_graphics_at_tick(
+                rom,
+                animation,
+                rom.metadata().campaign,
+                animation_tick);
+        signature ^= static_cast<std::uint8_t>(slot);
+        signature *= signature_prime;
+        signature ^= graphics_index;
+        signature *= signature_prime;
+        if (vram != nullptr) {
+            const auto graphics_entry =
+                offsets.animation_graphics_headers +
+                static_cast<std::size_t>(graphics_index) *
+                    graphics_header_entry_size;
+            load_graphics_entry(rom, graphics_entry, *vram);
+        }
     }
+    return signature;
 }
 
 std::vector<std::uint8_t> unique_palette_overrides(
@@ -499,10 +590,18 @@ TilesetDescriptor RoomPixelDecoder::describe_tileset(
             season_table +
             static_cast<std::size_t>(season) * tileset_record_size;
     }
+    const auto collision_and_dungeon = rom_.read_byte(record);
+    const auto dungeon_nibble =
+        static_cast<std::uint8_t>(collision_and_dungeon & 0x0f);
 
     return TilesetDescriptor{
         .assignment = assignment,
         .index = index,
+        .collision_mode = static_cast<std::uint8_t>(
+            collision_and_dungeon >> 4u),
+        .dungeon_index = dungeon_nibble == 0x0f
+            ? static_cast<std::uint8_t>(0xff)
+            : dungeon_nibble,
         .flags = rom_.read_byte(record + 1),
         .unique_graphics = static_cast<std::uint8_t>(
             rom_.read_byte(record + 2) | (assignment & 0x80)),
@@ -516,7 +615,8 @@ TilesetDescriptor RoomPixelDecoder::describe_tileset(
 
 RenderedRoom RoomPixelDecoder::render(
     const RoomLayout& room,
-    const Season season) const {
+    const Season season,
+    const std::uint64_t animation_tick) const {
     const auto offsets = offsets_for(rom_.metadata().campaign);
     const auto descriptor =
         describe_tileset(
@@ -537,11 +637,13 @@ RenderedRoom RoomPixelDecoder::render(
             offsets,
             descriptor.unique_graphics,
             vram);
-    load_initial_animation_frames(
-        rom_,
-        offsets,
-        descriptor.animation,
-        vram);
+    const auto rendered_animation_signature =
+        collect_animation_frames(
+            rom_,
+            offsets,
+            descriptor.animation,
+            animation_tick,
+            &vram);
     BackgroundPalettes palettes{};
     load_palette_header(rom_, offsets, 0x0f, palettes);
     load_palette_header(rom_, offsets, descriptor.palette, palettes);
@@ -566,6 +668,7 @@ RenderedRoom RoomPixelDecoder::render(
     RenderedRoom rendered{
         .id = room.id,
         .tileset = descriptor,
+        .animation_signature = rendered_animation_signature,
     };
     for (std::size_t metatile_y = 0;
          metatile_y < small_room_rows;
@@ -604,6 +707,17 @@ RenderedRoom RoomPixelDecoder::render(
         }
     }
     return rendered;
+}
+
+std::uint64_t RoomPixelDecoder::animation_signature(
+    const std::uint8_t animation_group,
+    const std::uint64_t animation_tick) const {
+    return collect_animation_frames(
+        rom_,
+        offsets_for(rom_.metadata().campaign),
+        animation_group,
+        animation_tick,
+        nullptr);
 }
 
 std::vector<std::uint8_t> RoomPixelDecoder::decompress_graphics(

@@ -8,6 +8,7 @@
 
 #include "oracle/core/simulation_region.h"
 #include "oracle/content/room_layout.h"
+#include "oracle/content/room_mutations.h"
 #include "oracle/content/room_pixels.h"
 #include "oracle/experience_settings.h"
 #include "oracle/core/item_campaign_policy.h"
@@ -359,6 +360,24 @@ void test_graphics_decompression() {
         "graphics mode two expands its repeated-byte mask");
 }
 
+void test_room_tile_replacements() {
+    using oracle::content::RoomMutationDecoder;
+    using oracle::content::TileReplacement;
+
+    std::array<std::uint8_t, 6> metatiles{1, 2, 1, 3, 4, 1};
+    const std::array<TileReplacement, 2> replacements{
+        TileReplacement{.replacement = 4, .target = 1},
+        TileReplacement{.replacement = 5, .target = 4},
+    };
+    RoomMutationDecoder::apply_replacements(
+        metatiles,
+        replacements);
+    check(
+        metatiles ==
+            std::array<std::uint8_t, 6>{5, 2, 5, 3, 5, 5},
+        "room substitutions replace every matching metatile in table order");
+}
+
 }  // namespace
 
 int main() {
@@ -368,6 +387,7 @@ int main() {
     test_experience_profiles();
     test_room_layout_decompression();
     test_graphics_decompression();
+    test_room_tile_replacements();
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
         return EXIT_FAILURE;

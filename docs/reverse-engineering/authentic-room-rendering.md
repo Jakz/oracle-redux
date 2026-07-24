@@ -23,7 +23,7 @@ roomTilesetsGroupTable
         |
         +---- main GFX header -----> two-bank emulated VRAM
         +---- unique GFX header --> overwrites emulated VRAM
-        +---- animation group ----> initial animated tile frames
+        +---- animation group ----> timed, looping animated tile frames
         +---- palette header -----> emulated BG palette RAM
 ```
 
@@ -77,18 +77,30 @@ Implemented:
 - all four Seasons descriptor variants;
 - main and unique background graphics;
 - startup background palette plus tileset palette overrides;
-- the initial animation tile frame used during room initialization;
+- cartridge-native animation initialization, countdowns, frames, and loops;
+- deterministic animation selection from a 60 Hz logic tick;
+- standard persistent room-flag tile substitutions for flags 0, 1, 2, 3,
+  and 7;
 - the Ages past-cliff palette substitution;
 - cross-room composition and a diagnostic fallback.
 
 Not yet applied:
 
-- animation advancement after the initial frame;
-- runtime room tile substitutions and event-dependent overrides;
+- common dynamic substitutions such as chests, shutters, toggle blocks, and
+  water-state changes;
+- room-specific pre- and post-graphics event overrides;
 - large dungeon-room layout decoding;
 - sprites, objects, collision behavior, and game state;
 - tileset overrides tied to save flags, companions, or dungeon water level.
 
-These omissions are explicit layers, not baked visual approximations. The next
-content milestone should add time-varying animation state and event-driven room
-tile changes while retaining the current ROM-backed surfaces as the base layer.
+The animation decoder treats the first sequence byte as the initial countdown,
+then reads alternating graphics-header indices and countdowns. A countdown of
+`0xff` is followed by the low byte of the original signed backward jump. Ages
+performs the original three initialization advances; Seasons performs one.
+Later ticks decrement the unsigned countdown and advance on zero. The viewer
+recomposes and uploads the visible region only when its aggregate animation
+signature changes.
+
+These omissions are explicit layers, not baked visual approximations. The room
+mutation stages and the boundary for the next implementation are recorded in
+[`room-mutation-pipeline.md`](room-mutation-pipeline.md).

@@ -28,6 +28,8 @@ struct RgbaPixel {
 struct TilesetDescriptor {
     std::uint8_t assignment{};
     std::uint8_t index{};
+    std::uint8_t collision_mode{};
+    std::uint8_t dungeon_index{0xff};
     std::uint8_t flags{};
     std::uint8_t unique_graphics{};
     std::uint8_t main_graphics{};
@@ -40,6 +42,7 @@ struct TilesetDescriptor {
 struct RenderedRoom {
     core::WorldRoomId id;
     TilesetDescriptor tileset;
+    std::uint64_t animation_signature{};
     std::array<
         RgbaPixel,
         small_room_world_width * small_room_world_height>
@@ -57,7 +60,12 @@ public:
 
     [[nodiscard]] RenderedRoom render(
         const RoomLayout& room,
-        Season season = Season::spring) const;
+        Season season = Season::spring,
+        std::uint64_t animation_tick = 0) const;
+
+    [[nodiscard]] std::uint64_t animation_signature(
+        std::uint8_t animation_group,
+        std::uint64_t animation_tick) const;
 
     [[nodiscard]] static std::vector<std::uint8_t> decompress_graphics(
         std::span<const std::uint8_t> source,

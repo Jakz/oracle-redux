@@ -91,6 +91,8 @@ The scaffold currently contains:
 - exact US ROM validation and small-room layout decompression;
 - cartridge-native tileset assignment, metatile, graphics, animation-frame,
   attribute, and palette decoding;
+- deterministic cartridge-native background animation advancement;
+- persistent room-flag tile substitutions decoded from both cartridges;
 - an SDL3 GPU room viewer using authentic ROM-derived 3×3 world regions.
 
 All C++ headers use `.h`; the Python test suite enforces this convention.
@@ -136,6 +138,18 @@ Validate and decode without opening a window:
 build/oracle_room_slice path/to/oracle.gbc --room 91 --describe
 ```
 
+Set a deterministic starting animation tick, or preview the original
+persistent room-flag substitutions:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc \
+  --room 91 --tick 120 --room-flags 80 --describe
+```
+
+`--room-flags` accepts one hexadecimal byte. It is currently a content-decoder
+preview and applies the same flags to every visible room; save-file-backed
+per-room state comes in a later simulation milestone.
+
 Save one local frame and exit:
 
 ```sh
@@ -149,6 +163,8 @@ repository and executable contain no extracted Nintendo graphics.
 
 The ROM structures and current rendering boundary are documented in
 [`docs/reverse-engineering/authentic-room-rendering.md`](docs/reverse-engineering/authentic-room-rendering.md).
+The staged room-state boundary is cataloged in
+[`docs/reverse-engineering/room-mutation-pipeline.md`](docs/reverse-engineering/room-mutation-pipeline.md).
 
 Windows developers can instead open the maintained solution at
 [`projects/msvc/oracle-redux.sln`](projects/msvc/oracle-redux.sln).
