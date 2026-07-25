@@ -93,6 +93,8 @@ The scaffold currently contains:
   attribute, and palette decoding;
 - deterministic cartridge-native background animation advancement;
 - persistent room-flag tile substitutions decoded from both cartridges;
+- cartridge-native per-metatile collision properties, including the original
+  bridge, hole, track, and stair shape rules;
 - all 256 small rooms in world groups 0–3, with full-resolution atlas export;
 - individual 15×11 large rooms from dungeon and side-scrolling groups 4–7;
 - an SDL3 GPU room viewer using authentic ROM-derived 3×3 world regions.
@@ -120,6 +122,7 @@ Controls:
 - the mouse wheel zooms between overview and close-up scales;
 - `R` resets the camera;
 - `F1` switches between authentic pixels and the metatile diagnostic view;
+- `F2` overlays the decoded ROM collision shapes;
 - `Escape` exits.
 
 Choose another room by its hexadecimal overworld coordinate:
@@ -144,6 +147,12 @@ Validate and decode without opening a window:
 
 ```sh
 build/oracle_room_slice path/to/oracle.gbc --room 91 --describe
+```
+
+Start with the collision diagnostic visible:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc --room 91 --collisions
 ```
 
 Set a deterministic starting animation tick, or preview the original
@@ -206,6 +215,8 @@ The world-group topology and atlas semantics are documented in
 [`docs/reverse-engineering/world-atlas-rendering.md`](docs/reverse-engineering/world-atlas-rendering.md).
 The large-room format is documented in
 [`docs/reverse-engineering/large-room-rendering.md`](docs/reverse-engineering/large-room-rendering.md).
+The decoded traversal properties and collision profiles are documented in
+[`docs/reverse-engineering/room-collisions.md`](docs/reverse-engineering/room-collisions.md).
 
 Windows developers can instead open the maintained solution at
 [`projects/msvc/oracle-redux.sln`](projects/msvc/oracle-redux.sln).

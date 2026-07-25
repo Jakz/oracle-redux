@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "oracle/core/simulation_region.h"
+#include "oracle/content/room_collisions.h"
 #include "oracle/content/room_layout.h"
 #include "oracle/content/room_mutations.h"
 #include "oracle/content/room_pixels.h"
@@ -409,6 +410,49 @@ void test_room_tile_replacements() {
         "room substitutions replace every matching metatile in table order");
 }
 
+void test_room_collision_shapes() {
+    using oracle::content::CollisionProfile;
+    using oracle::content::RoomCollisionDecoder;
+
+    check(
+        RoomCollisionDecoder::is_solid(0x08, 1, 1),
+        "simple collision bit 3 covers the top-left quadrant");
+    check(
+        !RoomCollisionDecoder::is_solid(0x08, 9, 1),
+        "simple collision bit 3 excludes the top-right quadrant");
+    check(
+        RoomCollisionDecoder::is_solid(0x01, 15, 15),
+        "simple collision bit 0 covers the bottom-right quadrant");
+
+    check(
+        !RoomCollisionDecoder::is_solid(
+            0x10,
+            8,
+            8,
+            CollisionProfile::link),
+        "Link can enter a hole so its separate fall behavior can run");
+    check(
+        RoomCollisionDecoder::is_solid(
+            0x10,
+            8,
+            8,
+            CollisionProfile::grounded_actor),
+        "grounded actors treat holes as fully solid");
+
+    check(
+        RoomCollisionDecoder::is_solid(0x11, 1, 8),
+        "vertical bridge blocks its far-left two-pixel column");
+    check(
+        !RoomCollisionDecoder::is_solid(0x11, 7, 8),
+        "vertical bridge leaves its center open");
+    check(
+        RoomCollisionDecoder::is_solid(0x19, 8, 1),
+        "horizontal bridge blocks its top two-pixel row");
+    check(
+        !RoomCollisionDecoder::is_solid(0x19, 8, 7),
+        "horizontal bridge leaves its center open");
+}
+
 }  // namespace
 
 int main() {
@@ -419,6 +463,7 @@ int main() {
     test_room_layout_decompression();
     test_graphics_decompression();
     test_room_tile_replacements();
+    test_room_collision_shapes();
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
         return EXIT_FAILURE;

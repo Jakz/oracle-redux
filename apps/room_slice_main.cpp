@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "oracle/content/rom_source.h"
+#include "oracle/content/room_collisions.h"
 #include "oracle/content/room_layout.h"
 #include "oracle/content/room_mutations.h"
 #include "oracle/content/room_pixels.h"
@@ -245,6 +246,135 @@ void render_room_borders(
                 placement.layout.pixel_height() * camera.zoom),
         };
         SDL_RenderRect(renderer, &border);
+    }
+}
+
+void render_collision_overlay(
+    SDL_Renderer* renderer,
+    const std::vector<RoomPlacement>& rooms,
+    const std::vector<oracle::content::RoomCollisionMap>& collisions,
+    const CameraState camera,
+    const int output_width,
+    const int output_height) {
+    if (rooms.size() != collisions.size()) {
+        throw std::invalid_argument{
+            "room placements and collision maps are not aligned"};
+    }
+    const auto to_screen_x = [&](const double world_x) {
+        return static_cast<float>(
+            (world_x - camera.x) * camera.zoom + output_width * 0.5);
+    };
+    const auto to_screen_y = [&](const double world_y) {
+        return static_cast<float>(
+            (world_y - camera.y) * camera.zoom + output_height * 0.5);
+    };
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    for (std::size_t room_index = 0;
+         room_index < rooms.size();
+         ++room_index) {
+        const auto& placement = rooms[room_index];
+        const auto& map = collisions[room_index];
+        for (std::size_t row = 0; row < map.rows; ++row) {
+            for (std::size_t column = 0; column < map.columns; ++column) {
+                const auto collision = map.at(column, row);
+                if (collision == 0) {
+                    continue;
+                }
+                const auto world_x =
+                    placement.world_x +
+                    static_cast<double>(
+                        column * oracle::content::metatile_world_size);
+                const auto world_y =
+                    placement.world_y +
+                    static_cast<double>(
+                        row * oracle::content::metatile_world_size);
+                const SDL_FRect metatile_rect{
+                    .x = to_screen_x(world_x),
+                    .y = to_screen_y(world_y),
+                    .w = static_cast<float>(16.0 * camera.zoom),
+                    .h = static_cast<float>(16.0 * camera.zoom),
+                };
+                if (
+                    metatile_rect.x + metatile_rect.w < 0 ||
+                    metatile_rect.y + metatile_rect.h < 0 ||
+                    metatile_rect.x > output_width ||
+                    metatile_rect.y > output_height) {
+                    continue;
+                }
+
+                if (collision == 0x10) {
+                    SDL_SetRenderDrawColor(renderer, 35, 145, 255, 100);
+                    SDL_RenderFillRect(renderer, &metatile_rect);
+                } else if (collision < 0x10) {
+                    SDL_SetRenderDrawColor(renderer, 255, 52, 52, 105);
+                    for (std::uint8_t quadrant_y = 0;
+                         quadrant_y < 2;
+                         ++quadrant_y) {
+                        for (std::uint8_t quadrant_x = 0;
+                             quadrant_x < 2;
+                             ++quadrant_x) {
+                            const auto sample_x = static_cast<std::uint8_t>(
+                                quadrant_x * 8 + 4);
+                            const auto sample_y = static_cast<std::uint8_t>(
+                                quadrant_y * 8 + 4);
+                            if (!oracle::content::RoomCollisionDecoder::
+                                    is_solid(
+                                        collision,
+                                        sample_x,
+                                        sample_y)) {
+                                continue;
+                            }
+                            const SDL_FRect quadrant{
+                                .x = to_screen_x(
+                                    world_x + quadrant_x * 8),
+                                .y = to_screen_y(
+                                    world_y + quadrant_y * 8),
+                                .w = static_cast<float>(
+                                    8.0 * camera.zoom + 0.25),
+                                .h = static_cast<float>(
+                                    8.0 * camera.zoom + 0.25),
+                            };
+                            SDL_RenderFillRect(renderer, &quadrant);
+                        }
+                    }
+                } else {
+                    SDL_SetRenderDrawColor(renderer, 255, 115, 40, 125);
+                    const auto vertical =
+                        (collision & 0x0f) < 8;
+                    for (std::uint8_t stripe = 0; stripe < 8; ++stripe) {
+                        const auto sample =
+                            static_cast<std::uint8_t>(stripe * 2 + 1);
+                        if (!oracle::content::RoomCollisionDecoder::is_solid(
+                                collision,
+                                vertical ? sample : 8,
+                                vertical ? 8 : sample)) {
+                            continue;
+                        }
+                        const SDL_FRect stripe_rect{
+                            .x = to_screen_x(
+                                world_x + (vertical ? stripe * 2 : 0)),
+                            .y = to_screen_y(
+                                world_y + (vertical ? 0 : stripe * 2)),
+                            .w = static_cast<float>(
+                                (vertical ? 2.0 : 16.0) *
+                                camera.zoom),
+                            .h = static_cast<float>(
+                                (vertical ? 16.0 : 2.0) *
+                                camera.zoom),
+                        };
+                        SDL_RenderFillRect(renderer, &stripe_rect);
+                    }
+                }
+
+                if (
+                    oracle::content::RoomCollisionDecoder::is_special(
+                        collision)) {
+                    SDL_SetRenderDrawColor(renderer, 50, 210, 255, 190);
+                    SDL_RenderRect(renderer, &metatile_rect);
+                }
+            }
+        }
     }
 }
 
@@ -535,12 +665,16 @@ void print_description(
     const std::uint8_t center_room,
     const bool atlas_mode,
     const bool large_room_mode,
+    const std::vector<oracle::content::RoomCollisionMap>& collisions,
     const RegionPixels* authentic_region,
     const std::uint64_t animation_tick,
     const std::uint8_t room_flags) {
     constexpr std::uint64_t signature_prime = 1099511628211ull;
     auto layout_signature = 14695981039346656037ull;
     std::unordered_set<std::uint8_t> metatiles;
+    auto collision_signature = 14695981039346656037ull;
+    std::size_t special_collisions = 0;
+    std::size_t collision_cells = 0;
     for (const auto& room : rooms) {
         layout_signature ^= room.layout.id.area;
         layout_signature *= signature_prime;
@@ -553,6 +687,19 @@ void print_description(
         metatiles.insert(
             room.layout.metatiles.begin(),
             room.layout.metatiles.end());
+    }
+    for (const auto& map : collisions) {
+        const auto map_signature =
+            oracle::content::RoomCollisionDecoder::signature(map);
+        collision_signature ^= map_signature;
+        collision_signature *= signature_prime;
+        for (const auto value : map.values) {
+            collision_cells += value != 0 ? 1u : 0u;
+            special_collisions +=
+                oracle::content::RoomCollisionDecoder::is_special(value)
+                ? 1u
+                : 0u;
+        }
     }
     std::cout
         << "campaign=" << campaign_name(rom.metadata().campaign) << '\n'
@@ -577,6 +724,10 @@ void print_description(
         << "unique_metatiles=" << metatiles.size() << '\n'
         << "layout_signature=" << std::hex << std::setw(16)
         << std::setfill('0') << layout_signature << std::dec << '\n'
+        << "collision_signature=" << std::hex << std::setw(16)
+        << std::setfill('0') << collision_signature << std::dec << '\n'
+        << "collision_cells=" << collision_cells << '\n'
+        << "special_collision_cells=" << special_collisions << '\n'
         << "render_mode="
         << (authentic_region != nullptr ? "authentic-rom" : "diagnostic")
         << '\n'
@@ -648,6 +799,7 @@ void save_region_bmp(
 int run_window(
     const oracle::content::RomSource& rom,
     const std::vector<RoomPlacement>& rooms,
+    const std::vector<oracle::content::RoomCollisionMap>& collisions,
     RegionPixels* authentic_region,
     const oracle::content::RoomPixelDecoder& pixel_decoder,
     const oracle::content::Season season,
@@ -655,6 +807,7 @@ int run_window(
     const bool atlas_mode,
     const bool large_room_mode,
     const bool force_diagnostic,
+    const bool force_collision_overlay,
     const std::uint64_t starting_animation_tick,
     std::optional<std::filesystem::path> screenshot_path) {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
@@ -767,6 +920,7 @@ int run_window(
     bool running = true;
     bool diagnostic =
         force_diagnostic || authentic_region == nullptr;
+    bool collision_overlay = force_collision_overlay;
 
     while (running) {
         SDL_Event event{};
@@ -791,6 +945,10 @@ int run_window(
                 event.key.key == SDLK_F1 &&
                 authentic_region != nullptr) {
                 diagnostic = !diagnostic;
+            } else if (
+                event.type == SDL_EVENT_KEY_DOWN &&
+                event.key.key == SDLK_F2) {
+                collision_overlay = !collision_overlay;
             } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
                 current.zoom = std::clamp(
                     current.zoom * std::pow(1.15, event.wheel.y),
@@ -924,10 +1082,19 @@ int run_window(
                 output_height,
                 center_room);
         }
+        if (collision_overlay) {
+            render_collision_overlay(
+                renderer,
+                rooms,
+                collisions,
+                render_camera,
+                output_width,
+                output_height);
+        }
 
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(renderer, 8, 10, 18, 210);
-        const SDL_FRect panel{12.0f, 12.0f, 460.0f, 58.0f};
+        const SDL_FRect panel{12.0f, 12.0f, 560.0f, 78.0f};
         SDL_RenderFillRect(renderer, &panel);
         SDL_SetRenderDrawColor(renderer, 232, 238, 248, SDL_ALPHA_OPAQUE);
         const std::string line_one =
@@ -936,8 +1103,13 @@ int run_window(
             diagnostic
             ? "F1: authentic view | R: reset | mode: diagnostic"
             : "F1: diagnostic view | R: reset | mode: authentic";
+        const std::string line_three =
+            collision_overlay
+            ? "F2: hide collisions | red: solid | blue/cyan: special"
+            : "F2: show ROM collision shapes";
         SDL_RenderDebugText(renderer, 22.0f, 23.0f, line_one.c_str());
         SDL_RenderDebugText(renderer, 22.0f, 43.0f, line_two.c_str());
+        SDL_RenderDebugText(renderer, 22.0f, 63.0f, line_three.c_str());
         if (screenshot_path.has_value()) {
             SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
             if (pixels == nullptr) {
@@ -977,6 +1149,7 @@ int main(int argc, char* argv[]) {
                    "[--group HEX] [--room HEX] [--season NAME] "
                    "[--atlas] [--export-atlas PATH] "
                    "[--export-region PATH] [--diagnostic] "
+                   "[--collisions] "
                    "[--tick N] [--room-flags HEX] "
                    "[--describe] [--screenshot PATH]\n";
             return EXIT_FAILURE;
@@ -987,6 +1160,7 @@ int main(int argc, char* argv[]) {
         std::uint8_t center_room = 0x91;
         bool describe_only = false;
         bool force_diagnostic = false;
+        bool force_collision_overlay = false;
         bool atlas_mode = false;
         auto season = oracle::content::Season::spring;
         std::uint64_t animation_tick = 0;
@@ -1001,6 +1175,8 @@ int main(int argc, char* argv[]) {
                 atlas_mode = true;
             } else if (argument == "--diagnostic") {
                 force_diagnostic = true;
+            } else if (argument == "--collisions") {
+                force_collision_overlay = true;
             } else if (argument == "--group" && index + 1 < argc) {
                 world_group = parse_hex_byte(argv[++index]);
             } else if (argument == "--room" && index + 1 < argc) {
@@ -1043,6 +1219,7 @@ int main(int argc, char* argv[]) {
         const auto rom = oracle::content::RomSource::load(rom_path);
         const oracle::content::RoomLayoutDecoder layout_decoder{rom};
         const oracle::content::RoomPixelDecoder pixel_decoder{rom};
+        const oracle::content::RoomCollisionDecoder collision_decoder{rom};
         const oracle::content::RoomMutationDecoder mutation_decoder{rom};
         const auto center_tileset =
             pixel_decoder.describe_tileset(
@@ -1086,6 +1263,16 @@ int main(int argc, char* argv[]) {
                   1,
                   season,
                   room_flags);
+        std::vector<oracle::content::RoomCollisionMap> collisions;
+        collisions.reserve(rooms.size());
+        for (const auto& placement : rooms) {
+            const auto tileset = pixel_decoder.describe_tileset(
+                static_cast<std::uint8_t>(placement.layout.id.area),
+                static_cast<std::uint8_t>(placement.layout.id.room),
+                season);
+            collisions.push_back(
+                collision_decoder.decode(placement.layout, tileset));
+        }
         std::optional<RegionPixels> authentic_region;
         if (!force_diagnostic) {
             try {
@@ -1109,6 +1296,7 @@ int main(int argc, char* argv[]) {
             center_room,
             atlas_mode,
             large_room_mode,
+            collisions,
             authentic_region ? &*authentic_region : nullptr,
             animation_tick,
             room_flags);
@@ -1126,6 +1314,7 @@ int main(int argc, char* argv[]) {
         return run_window(
             rom,
             rooms,
+            collisions,
             authentic_region ? &*authentic_region : nullptr,
             pixel_decoder,
             season,
@@ -1133,6 +1322,7 @@ int main(int argc, char* argv[]) {
             atlas_mode,
             large_room_mode,
             force_diagnostic,
+            force_collision_overlay,
             animation_tick,
             screenshot_path);
     } catch (const std::exception& error) {

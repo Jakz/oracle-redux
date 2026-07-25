@@ -31,6 +31,7 @@ target_link_libraries(oracle_core PUBLIC oracle_experience)
 
 add_library(oracle_content
     src/content/rom_source.cpp
+    src/content/room_collisions.cpp
     src/content/room_layout.cpp
     src/content/room_mutations.cpp
     src/content/room_pixels.cpp
