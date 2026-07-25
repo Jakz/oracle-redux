@@ -24,6 +24,7 @@
 #include "oracle/content/room_layout.h"
 #include "oracle/content/room_mutations.h"
 #include "oracle/content/room_pixels.h"
+#include "oracle/content/room_topology.h"
 #include "oracle/core/campaign.h"
 #include "oracle/presentation/frame_timing.h"
 
@@ -80,7 +81,7 @@ std::uint64_t parse_unsigned_integer(const std::string_view text) {
         10);
     if (error != std::errc{} || end != text.data() + text.size()) {
         throw std::invalid_argument{
-            "animation tick must be an unsigned decimal integer"};
+            "value must be an unsigned decimal integer"};
     }
     return value;
 }
@@ -658,6 +659,132 @@ std::string campaign_name(const oracle::core::Campaign campaign) {
     return campaign == oracle::core::Campaign::ages ? "Ages" : "Seasons";
 }
 
+std::string_view exit_kind_name(
+    const oracle::content::RoomExitKind kind) {
+    using oracle::content::RoomExitKind;
+    switch (kind) {
+    case RoomExitKind::north_seam:
+        return "north-seam";
+    case RoomExitKind::east_seam:
+        return "east-seam";
+    case RoomExitKind::south_seam:
+        return "south-seam";
+    case RoomExitKind::west_seam:
+        return "west-seam";
+    case RoomExitKind::tile_warp:
+        return "tile-warp";
+    case RoomExitKind::screen_edge_warp:
+        return "screen-edge-warp";
+    case RoomExitKind::fallback_warp:
+        return "fallback-warp";
+    }
+    return "unknown";
+}
+
+void print_room_exits(
+    const std::vector<oracle::content::RoomExit>& exits) {
+    std::cout << "exit_count=" << exits.size() << '\n';
+    for (std::size_t index = 0; index < exits.size(); ++index) {
+        const auto& exit = exits[index];
+        std::cout
+            << "exit[" << index << "]=" << exit_kind_name(exit.kind)
+            << " source=" << std::hex << std::setw(2)
+            << std::setfill('0')
+            << static_cast<unsigned int>(exit.source.area)
+            << ':' << std::setw(2)
+            << static_cast<unsigned int>(exit.source.room)
+            << " destination=" << std::setw(2)
+            << static_cast<unsigned int>(exit.destination.area)
+            << ':' << std::setw(2)
+            << static_cast<unsigned int>(exit.destination.room);
+        if (exit.has_source_position) {
+            std::cout
+                << " source_yx=" << std::setw(2)
+                << static_cast<unsigned int>(exit.source_position);
+        }
+        if (
+            exit.kind == oracle::content::RoomExitKind::screen_edge_warp) {
+            std::cout
+                << " edge_mask=" << std::setw(2)
+                << static_cast<unsigned int>(exit.source_edge_mask);
+        }
+        if (
+            exit.kind == oracle::content::RoomExitKind::tile_warp ||
+            exit.kind == oracle::content::RoomExitKind::screen_edge_warp ||
+            exit.kind == oracle::content::RoomExitKind::fallback_warp) {
+            std::cout
+                << " destination_yx=" << std::setw(2)
+                << static_cast<unsigned int>(exit.destination_position)
+                << " dest_index=" << std::setw(2)
+                << static_cast<unsigned int>(exit.destination_index)
+                << " transitions="
+                << static_cast<unsigned int>(exit.source_transition)
+                << '/' << static_cast<unsigned int>(
+                       exit.destination_transition)
+                << " parameter="
+                << static_cast<unsigned int>(
+                       exit.destination_parameter);
+        }
+        std::cout << std::dec << '\n';
+    }
+}
+
+void print_topology_catalog(
+    const oracle::content::RoomTopologyDecoder& topology,
+    const std::uint8_t destination_variant) {
+    constexpr std::uint64_t signature_prime = 1099511628211ull;
+    auto signature = 14695981039346656037ull;
+    std::size_t warp_edges = 0;
+    std::size_t tile_edges = 0;
+    std::size_t screen_edge_edges = 0;
+    std::size_t fallback_edges = 0;
+    std::size_t destinations = 0;
+    for (std::uint8_t group = 0; group < 8; ++group) {
+        destinations += topology.warp_destinations(group).size();
+        for (std::uint16_t room = 0; room < 256; ++room) {
+            const auto exits = topology.exits(
+                group,
+                static_cast<std::uint8_t>(room),
+                destination_variant,
+                false);
+            for (const auto& exit : exits) {
+                ++warp_edges;
+                tile_edges +=
+                    exit.kind == oracle::content::RoomExitKind::tile_warp
+                    ? 1u
+                    : 0u;
+                screen_edge_edges +=
+                    exit.kind ==
+                        oracle::content::RoomExitKind::screen_edge_warp
+                    ? 1u
+                    : 0u;
+                fallback_edges +=
+                    exit.kind == oracle::content::RoomExitKind::fallback_warp
+                    ? 1u
+                    : 0u;
+                signature ^= exit.source.area;
+                signature *= signature_prime;
+                signature ^= exit.source.room;
+                signature *= signature_prime;
+                signature ^= exit.destination.area;
+                signature *= signature_prime;
+                signature ^= exit.destination.room;
+                signature *= signature_prime;
+                signature ^= static_cast<std::uint8_t>(exit.kind);
+                signature *= signature_prime;
+            }
+        }
+    }
+    std::cout
+        << "topology_destinations=" << destinations << '\n'
+        << "topology_warp_edges=" << warp_edges << '\n'
+        << "topology_tile_edges=" << tile_edges << '\n'
+        << "topology_screen_edge_edges=" << screen_edge_edges << '\n'
+        << "topology_fallback_edges=" << fallback_edges << '\n'
+        << "topology_signature=" << std::hex << std::setw(16)
+        << std::setfill('0') << signature << std::dec << '\n';
+}
+
 void print_description(
     const oracle::content::RomSource& rom,
     const std::vector<RoomPlacement>& rooms,
@@ -1150,6 +1277,8 @@ int main(int argc, char* argv[]) {
                    "[--atlas] [--export-atlas PATH] "
                    "[--export-region PATH] [--diagnostic] "
                    "[--collisions] "
+                   "[--list-exits] [--follow-exit N] "
+                   "[--catalog-topology] "
                    "[--tick N] [--room-flags HEX] "
                    "[--describe] [--screenshot PATH]\n";
             return EXIT_FAILURE;
@@ -1162,6 +1291,8 @@ int main(int argc, char* argv[]) {
         bool force_diagnostic = false;
         bool force_collision_overlay = false;
         bool atlas_mode = false;
+        bool catalog_topology = false;
+        std::optional<std::size_t> follow_exit_index;
         auto season = oracle::content::Season::spring;
         std::uint64_t animation_tick = 0;
         std::uint8_t room_flags = 0;
@@ -1177,6 +1308,16 @@ int main(int argc, char* argv[]) {
                 force_diagnostic = true;
             } else if (argument == "--collisions") {
                 force_collision_overlay = true;
+            } else if (argument == "--list-exits") {
+                describe_only = true;
+            } else if (argument == "--catalog-topology") {
+                catalog_topology = true;
+                describe_only = true;
+            } else if (
+                argument == "--follow-exit" &&
+                index + 1 < argc) {
+                follow_exit_index = static_cast<std::size_t>(
+                    parse_unsigned_integer(argv[++index]));
             } else if (argument == "--group" && index + 1 < argc) {
                 world_group = parse_hex_byte(argv[++index]);
             } else if (argument == "--room" && index + 1 < argc) {
@@ -1221,6 +1362,48 @@ int main(int argc, char* argv[]) {
         const oracle::content::RoomPixelDecoder pixel_decoder{rom};
         const oracle::content::RoomCollisionDecoder collision_decoder{rom};
         const oracle::content::RoomMutationDecoder mutation_decoder{rom};
+        const oracle::content::RoomTopologyDecoder topology_decoder{rom};
+        const auto destination_variant =
+            static_cast<std::uint8_t>(season);
+        if (catalog_topology) {
+            print_topology_catalog(
+                topology_decoder,
+                destination_variant);
+        }
+        if (follow_exit_index.has_value()) {
+            const auto source_exits =
+                topology_decoder.exits(
+                    world_group,
+                    center_room,
+                    destination_variant);
+            if (*follow_exit_index >= source_exits.size()) {
+                throw std::out_of_range{
+                    "follow-exit index exceeds the room exit list"};
+            }
+            const auto& followed = source_exits[*follow_exit_index];
+            std::cout
+                << "followed_exit=" << *follow_exit_index << '\n'
+                << "followed_kind=" << exit_kind_name(followed.kind) << '\n'
+                << "followed_source=" << std::hex << std::setw(2)
+                << std::setfill('0')
+                << static_cast<unsigned int>(world_group)
+                << ':' << std::setw(2)
+                << static_cast<unsigned int>(center_room) << '\n'
+                << "followed_destination=" << std::setw(2)
+                << static_cast<unsigned int>(followed.destination.area)
+                << ':' << std::setw(2)
+                << static_cast<unsigned int>(followed.destination.room)
+                << std::dec << '\n';
+            world_group =
+                static_cast<std::uint8_t>(followed.destination.area);
+            center_room =
+                static_cast<std::uint8_t>(followed.destination.room);
+        }
+        const auto room_exits =
+            topology_decoder.exits(
+                world_group,
+                center_room,
+                destination_variant);
         const auto center_tileset =
             pixel_decoder.describe_tileset(
                 world_group,
@@ -1300,6 +1483,7 @@ int main(int argc, char* argv[]) {
             authentic_region ? &*authentic_region : nullptr,
             animation_tick,
             room_flags);
+        print_room_exits(room_exits);
         if (region_output_path.has_value()) {
             if (!authentic_region.has_value()) {
                 throw std::runtime_error{

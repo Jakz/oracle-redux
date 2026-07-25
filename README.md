@@ -95,6 +95,8 @@ The scaffold currently contains:
 - persistent room-flag tile substitutions decoded from both cartridges;
 - cartridge-native per-metatile collision properties, including the original
   bridge, hole, track, and stair shape rules;
+- cartridge-native room seams, position-specific warps, screen-edge overrides,
+  transition metadata, and season-adjusted destinations;
 - all 256 small rooms in world groups 0–3, with full-resolution atlas export;
 - individual 15×11 large rooms from dungeon and side-scrolling groups 4–7;
 - an SDL3 GPU room viewer using authentic ROM-derived 3×3 world regions.
@@ -153,6 +155,22 @@ Start with the collision diagnostic visible:
 
 ```sh
 build/oracle_room_slice path/to/oracle.gbc --room 91 --collisions
+```
+
+List the selected room's graph edges, then follow an edge by its printed
+index:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc \
+  --group 0 --room 09 --list-exits
+build/oracle_room_slice path/to/oracle.gbc \
+  --group 0 --room 09 --follow-exit 3 --describe
+```
+
+Decode and validate the complete conditional warp graph:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc --catalog-topology
 ```
 
 Set a deterministic starting animation tick, or preview the original
@@ -217,6 +235,8 @@ The large-room format is documented in
 [`docs/reverse-engineering/large-room-rendering.md`](docs/reverse-engineering/large-room-rendering.md).
 The decoded traversal properties and collision profiles are documented in
 [`docs/reverse-engineering/room-collisions.md`](docs/reverse-engineering/room-collisions.md).
+Room adjacency, warp records, and graph navigation are documented in
+[`docs/reverse-engineering/room-topology.md`](docs/reverse-engineering/room-topology.md).
 
 Windows developers can instead open the maintained solution at
 [`projects/msvc/oracle-redux.sln`](projects/msvc/oracle-redux.sln).

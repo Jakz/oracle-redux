@@ -11,6 +11,7 @@
 #include "oracle/content/room_layout.h"
 #include "oracle/content/room_mutations.h"
 #include "oracle/content/room_pixels.h"
+#include "oracle/content/room_topology.h"
 #include "oracle/experience_settings.h"
 #include "oracle/core/item_campaign_policy.h"
 #include "oracle/core/item_runtime.h"
@@ -453,6 +454,32 @@ void test_room_collision_shapes() {
         "horizontal bridge leaves its center open");
 }
 
+void test_spatial_room_seams() {
+    using oracle::content::RoomExitKind;
+    using oracle::content::RoomTopologyDecoder;
+
+    const auto center = RoomTopologyDecoder::spatial_seams(0, 0x91);
+    check(center.size() == 4, "interior overworld rooms have four seams");
+    check(
+        center[0].kind == RoomExitKind::north_seam &&
+            center[0].destination.room == 0x81,
+        "north seam decrements the room row");
+    check(
+        center[1].kind == RoomExitKind::east_seam &&
+            center[1].destination.room == 0x92,
+        "east seam increments the room column");
+
+    const auto corner = RoomTopologyDecoder::spatial_seams(3, 0x00);
+    check(corner.size() == 2, "corner overworld rooms have two seams");
+    check(
+        corner[0].kind == RoomExitKind::east_seam &&
+            corner[1].kind == RoomExitKind::south_seam,
+        "top-left room only connects east and south");
+    check(
+        RoomTopologyDecoder::spatial_seams(4, 0x91).empty(),
+        "large-layout groups do not infer grid seams");
+}
+
 }  // namespace
 
 int main() {
@@ -464,6 +491,7 @@ int main() {
     test_graphics_decompression();
     test_room_tile_replacements();
     test_room_collision_shapes();
+    test_spatial_room_seams();
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
         return EXIT_FAILURE;

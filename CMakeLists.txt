@@ -35,6 +35,7 @@ add_library(oracle_content
     src/content/room_layout.cpp
     src/content/room_mutations.cpp
     src/content/room_pixels.cpp
+    src/content/room_topology.cpp
 )
 target_include_directories(oracle_content PUBLIC include)
 target_compile_features(oracle_content PUBLIC cxx_std_20)
