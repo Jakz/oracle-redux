@@ -94,6 +94,7 @@ The scaffold currently contains:
 - deterministic cartridge-native background animation advancement;
 - persistent room-flag tile substitutions decoded from both cartridges;
 - all 256 small rooms in world groups 0–3, with full-resolution atlas export;
+- individual 15×11 large rooms from dungeon and side-scrolling groups 4–7;
 - an SDL3 GPU room viewer using authentic ROM-derived 3×3 world regions.
 
 All C++ headers use `.h`; the Python test suite enforces this convention.
@@ -171,8 +172,20 @@ build/oracle_room_slice path/to/oracle.gbc \
 ```
 
 Groups `0` through `3` are the small-room address spaces in both campaigns.
-Groups `4` through `7` select large dungeon or side-scrolling layouts, which
-the decoder reports explicitly but does not render yet.
+Groups `4` through `7` select individual large dungeon or side-scrolling
+rooms. They render one room at a time because their room ids do not describe a
+continuous overworld grid:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc --group 4 --room c3
+```
+
+Export the selected neighborhood or large room at native resolution:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc \
+  --group 4 --room c3 --export-region build/room-c3.bmp
+```
 
 Save one local frame and exit:
 
@@ -191,6 +204,8 @@ The staged room-state boundary is cataloged in
 [`docs/reverse-engineering/room-mutation-pipeline.md`](docs/reverse-engineering/room-mutation-pipeline.md).
 The world-group topology and atlas semantics are documented in
 [`docs/reverse-engineering/world-atlas-rendering.md`](docs/reverse-engineering/world-atlas-rendering.md).
+The large-room format is documented in
+[`docs/reverse-engineering/large-room-rendering.md`](docs/reverse-engineering/large-room-rendering.md).
 
 Windows developers can instead open the maintained solution at
 [`projects/msvc/oracle-redux.sln`](projects/msvc/oracle-redux.sln).

@@ -84,14 +84,15 @@ Implemented:
 - the Ages past-cliff palette substitution;
 - cross-room composition and a diagnostic fallback;
 - complete 16×16 atlases for active small-room groups 0 through 3;
-- lossless `2560×2048` BMP export at a deterministic animation tick.
+- lossless `2560×2048` BMP export at a deterministic animation tick;
+- dictionary-compressed 15×11 large dungeon and side-scrolling rooms;
+- native-resolution export and dimension-aware rendering for either room size.
 
 Not yet applied:
 
 - common dynamic substitutions such as chests, shutters, toggle blocks, and
   water-state changes;
 - room-specific pre- and post-graphics event overrides;
-- large dungeon-room layout decoding;
 - sprites, objects, collision behavior, and game state;
 - tileset overrides tied to save flags, companions, or dungeon water level.
 

@@ -306,6 +306,37 @@ void test_room_layout_decompression() {
     check(
         repetition_matches,
         "mode-two ROM room repetitions decode exactly");
+
+    const std::array<std::uint8_t, 8> dictionary{
+        0x10,
+        0x11,
+        0x20,
+        0x21,
+        0x22,
+        0x23,
+        0x24,
+        0x25,
+    };
+    const std::array<std::uint8_t, 4> dictionary_stream{
+        0x02,
+        0x99,
+        0x02,
+        0x20,
+    };
+    check(
+        RoomLayoutDecoder::decode_dictionary_layout(
+            dictionary_stream,
+            dictionary,
+            6) ==
+            std::vector<std::uint8_t>{
+                0x99,
+                0x20,
+                0x21,
+                0x22,
+                0x23,
+                0x24,
+            },
+        "large-room dictionary references decode their packed length");
 }
 
 void test_graphics_decompression() {

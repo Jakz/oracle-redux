@@ -47,8 +47,8 @@ by the decoder is:
 | `1` | past Labrynna address space | Subrosia/small-room address space | full atlas |
 | `2` | present auxiliary small rooms | auxiliary small rooms | full atlas |
 | `3` | past auxiliary small rooms | auxiliary small rooms | full atlas |
-| `4`, `6` | first large-layout family | first large-layout family | cataloged, not decoded |
-| `5`, `7` | second large-layout family | second large-layout family | cataloged, not decoded |
+| `4`, `6` | first large-layout family | first large-layout family | individual rooms |
+| `5`, `7` | second large-layout family | second large-layout family | individual rooms |
 
 The group descriptions above are address-space roles, not a claim that every
 cell is a playable geographic room. Groups 2 and 3 contain interiors, caves,
@@ -56,9 +56,8 @@ and other small-room allocations. In Seasons, the original room-flag lookup
 aliases groups 1 through 3 to Subrosia's persistent room-state array.
 
 `roomLayoutGroupTable` has six entries in Ages and seven in Seasons. Its first
-byte selects the original large- or small-room decompressor. The current C++
-decoder reads this discriminator and reports the exact active group, room, and
-selected layout group when a large layout is requested.
+byte selects the original large- or small-room decompressor. The C++ decoder
+reads this discriminator and routes the selected room to the matching format.
 
 ## Raw atlas versus canonical map bounds
 
@@ -122,10 +121,11 @@ The atlas is a content and presentation diagnostic. It does not expand the
 active simulation region to 256 rooms, so enabling it cannot silently alter
 gameplay behavior.
 
-## Next boundary
+## Large-room boundary
 
 Large rooms are 15×11 metatiles and use a different dictionary-based layout
-format. Implementing that decompressor will unlock active groups 4 through 7,
+format. They are supported as individual rooms in active groups 4 through 7,
 including dungeon and side-scrolling address spaces. Their placement is not a
-16×16 seamless overworld, so they need a room catalog or dungeon topology view
-rather than being forced into the small-room atlas model.
+16×16 seamless overworld, so a future room catalog or dungeon topology view
+should connect them through recovered door and warp relationships rather than
+forcing them into the small-room atlas model.

@@ -617,6 +617,13 @@ RenderedRoom RoomPixelDecoder::render(
     const RoomLayout& room,
     const Season season,
     const std::uint64_t animation_tick) const {
+    if (
+        room.columns == 0 ||
+        room.rows == 0 ||
+        room.metatiles.size() != room.columns * room.rows) {
+        throw std::invalid_argument{
+            "room dimensions do not match its metatile data"};
+    }
     const auto offsets = offsets_for(rom_.metadata().campaign);
     const auto descriptor =
         describe_tileset(
@@ -668,17 +675,21 @@ RenderedRoom RoomPixelDecoder::render(
     RenderedRoom rendered{
         .id = room.id,
         .tileset = descriptor,
+        .width = room.pixel_width(),
+        .height = room.pixel_height(),
         .animation_signature = rendered_animation_signature,
     };
+    rendered.pixels.resize(
+        static_cast<std::size_t>(rendered.width * rendered.height));
     for (std::size_t metatile_y = 0;
-         metatile_y < small_room_rows;
+         metatile_y < room.rows;
          ++metatile_y) {
         for (std::size_t metatile_x = 0;
-             metatile_x < small_room_columns;
+             metatile_x < room.columns;
              ++metatile_x) {
             const auto metatile =
                 room.metatiles[
-                    metatile_y * small_room_columns + metatile_x];
+                    metatile_y * room.columns + metatile_x];
             const auto& mapping = mappings[metatile];
             for (std::size_t quadrant = 0; quadrant < 4; ++quadrant) {
                 const auto quadrant_x = quadrant & 1u;
@@ -699,7 +710,8 @@ RenderedRoom RoomPixelDecoder::render(
                             x,
                             y);
                         rendered.pixels[
-                            destination_y * small_room_world_width +
+                            destination_y *
+                                static_cast<std::size_t>(rendered.width) +
                             destination_x] = palettes[palette][color];
                     }
                 }

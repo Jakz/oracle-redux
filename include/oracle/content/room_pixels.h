@@ -42,11 +42,10 @@ struct TilesetDescriptor {
 struct RenderedRoom {
     core::WorldRoomId id;
     TilesetDescriptor tileset;
+    std::int32_t width{};
+    std::int32_t height{};
     std::uint64_t animation_signature{};
-    std::array<
-        RgbaPixel,
-        small_room_world_width * small_room_world_height>
-        pixels{};
+    std::vector<RgbaPixel> pixels;
 };
 
 class RoomPixelDecoder {
