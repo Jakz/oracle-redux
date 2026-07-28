@@ -97,6 +97,8 @@ The scaffold currently contains:
   bridge, hole, track, and stair shape rules;
 - cartridge-native room seams, position-specific warps, screen-edge overrides,
   transition metadata, and season-adjusted destinations;
+- collision-aware diagnostic player movement with wall sliding, anti-tunneling,
+  continuous small-room seam crossing, and a following widescreen camera;
 - all 256 small rooms in world groups 0–3, with full-resolution atlas export;
 - individual 15×11 large rooms from dungeon and side-scrolling groups 4–7;
 - an SDL3 GPU room viewer using authentic ROM-derived 3×3 world regions.
@@ -120,7 +122,8 @@ build/oracle_room_slice "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc"
 
 Controls:
 
-- `WASD` or arrow keys pan across room seams;
+- in normal launch mode, `WASD` or arrow keys move the diagnostic player;
+- in `--atlas` mode, `WASD` or arrow keys pan the camera;
 - the mouse wheel zooms between overview and close-up scales;
 - `R` resets the camera;
 - `F1` switches between authentic pixels and the metatile diagnostic view;
@@ -237,6 +240,9 @@ The decoded traversal properties and collision profiles are documented in
 [`docs/reverse-engineering/room-collisions.md`](docs/reverse-engineering/room-collisions.md).
 Room adjacency, warp records, and graph navigation are documented in
 [`docs/reverse-engineering/room-topology.md`](docs/reverse-engineering/room-topology.md).
+The current player coordinate, collision-body, and seamless traversal model is
+documented in
+[`docs/architecture/player-traversal.md`](docs/architecture/player-traversal.md).
 
 Windows developers can instead open the maintained solution at
 [`projects/msvc/oracle-redux.sln`](projects/msvc/oracle-redux.sln).

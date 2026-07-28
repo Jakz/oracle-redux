@@ -41,6 +41,13 @@ target_include_directories(oracle_content PUBLIC include)
 target_compile_features(oracle_content PUBLIC cxx_std_20)
 target_link_libraries(oracle_content PUBLIC oracle_core)
 
+add_library(oracle_gameplay
+    src/gameplay/player_traversal.cpp
+)
+target_include_directories(oracle_gameplay PUBLIC include)
+target_compile_features(oracle_gameplay PUBLIC cxx_std_20)
+target_link_libraries(oracle_gameplay PUBLIC oracle_content)
+
 add_library(oracle_presentation
     src/presentation/camera.cpp
     src/presentation/frame_timing.cpp
@@ -54,11 +61,13 @@ if(MSVC)
     target_compile_options(oracle_experience PRIVATE /W4 /permissive-)
     target_compile_options(oracle_core PRIVATE /W4 /permissive-)
     target_compile_options(oracle_content PRIVATE /W4 /permissive-)
+    target_compile_options(oracle_gameplay PRIVATE /W4 /permissive-)
     target_compile_options(oracle_presentation PRIVATE /W4 /permissive-)
 else()
     target_compile_options(oracle_experience PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(oracle_core PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(oracle_content PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(oracle_gameplay PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(oracle_presentation PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
@@ -78,6 +87,7 @@ if(ORACLE_BUILD_ROOM_SLICE)
             oracle_room_slice
             PRIVATE
                 oracle_content
+                oracle_gameplay
                 oracle_presentation
                 SDL3::SDL3
         )
@@ -108,6 +118,7 @@ if(ORACLE_BUILD_TESTS)
         PRIVATE
             oracle_core
             oracle_content
+            oracle_gameplay
             oracle_presentation
     )
     if(MSVC)

@@ -26,6 +26,7 @@
 #include "oracle/content/room_pixels.h"
 #include "oracle/content/room_topology.h"
 #include "oracle/core/campaign.h"
+#include "oracle/gameplay/player_traversal.h"
 #include "oracle/presentation/frame_timing.h"
 
 namespace {
@@ -377,6 +378,69 @@ void render_collision_overlay(
             }
         }
     }
+}
+
+void render_player(
+    SDL_Renderer* renderer,
+    const double world_x,
+    const double world_y,
+    const oracle::gameplay::PlayerFacing facing,
+    const CameraState camera,
+    const int output_width,
+    const int output_height) {
+    const auto screen_x = static_cast<float>(
+        (world_x - camera.x) * camera.zoom + output_width * 0.5);
+    const auto screen_y = static_cast<float>(
+        (world_y - camera.y) * camera.zoom + output_height * 0.5);
+    const auto half_width =
+        static_cast<float>(4.0 * camera.zoom);
+    const auto half_height =
+        static_cast<float>(4.0 * camera.zoom);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 4, 10, 14, 145);
+    const SDL_FRect shadow{
+        .x = screen_x - half_width - 1.0f,
+        .y = screen_y + half_height * 0.35f,
+        .w = half_width * 2.0f + 2.0f,
+        .h = std::max(2.0f, half_height * 0.65f),
+    };
+    SDL_RenderFillRect(renderer, &shadow);
+
+    SDL_SetRenderDrawColor(renderer, 70, 238, 118, SDL_ALPHA_OPAQUE);
+    const SDL_FRect body{
+        .x = screen_x - half_width,
+        .y = screen_y - half_height,
+        .w = half_width * 2.0f,
+        .h = half_height * 2.0f,
+    };
+    SDL_RenderFillRect(renderer, &body);
+    SDL_SetRenderDrawColor(renderer, 245, 255, 220, SDL_ALPHA_OPAQUE);
+    SDL_RenderRect(renderer, &body);
+
+    auto direction_x = 0.0f;
+    auto direction_y = 0.0f;
+    switch (facing) {
+    case oracle::gameplay::PlayerFacing::north:
+        direction_y = -1.0f;
+        break;
+    case oracle::gameplay::PlayerFacing::east:
+        direction_x = 1.0f;
+        break;
+    case oracle::gameplay::PlayerFacing::south:
+        direction_y = 1.0f;
+        break;
+    case oracle::gameplay::PlayerFacing::west:
+        direction_x = -1.0f;
+        break;
+    }
+    SDL_RenderLine(
+        renderer,
+        screen_x,
+        screen_y,
+        screen_x + direction_x *
+            static_cast<float>(7.0 * camera.zoom),
+        screen_y + direction_y *
+            static_cast<float>(7.0 * camera.zoom));
 }
 
 void copy_room_pixels(
@@ -792,6 +856,7 @@ void print_description(
     const std::uint8_t center_room,
     const bool atlas_mode,
     const bool large_room_mode,
+    const bool player_mode,
     const std::vector<oracle::content::RoomCollisionMap>& collisions,
     const RegionPixels* authentic_region,
     const std::uint64_t animation_tick,
@@ -843,7 +908,9 @@ void print_description(
         << (
             atlas_mode
             ? "atlas"
-            : large_room_mode ? "large-room" : "neighborhood")
+            : large_room_mode
+            ? "large-room"
+            : player_mode ? "traversable-world" : "neighborhood")
         << '\n'
         << "decoded_rooms=" << rooms.size() << '\n'
         << "room_columns=" << rooms.front().layout.columns << '\n'
@@ -933,6 +1000,7 @@ int run_window(
     const std::uint8_t center_room,
     const bool atlas_mode,
     const bool large_room_mode,
+    const bool player_mode,
     const bool force_diagnostic,
     const bool force_collision_overlay,
     const std::uint64_t starting_animation_tick,
@@ -1008,7 +1076,54 @@ int run_window(
           << " - ROM Room Slice - SDL3 GPU";
     SDL_SetWindowTitle(window, title.str().c_str());
 
-    const auto center_x = large_room_mode
+    const auto player_group =
+        static_cast<std::uint8_t>(
+            std::find_if(
+                rooms.begin(),
+                rooms.end(),
+                [center_room](const RoomPlacement& placement) {
+                    return placement.layout.id.room == center_room;
+                })->layout.id.area);
+    const auto collision_lookup =
+        [&](const oracle::core::WorldRoomId id)
+            -> const oracle::content::RoomCollisionMap* {
+            const auto found = std::find_if(
+                collisions.begin(),
+                collisions.end(),
+                [id](const oracle::content::RoomCollisionMap& map) {
+                    return map.id == id;
+                });
+            return found == collisions.end() ? nullptr : &*found;
+        };
+    oracle::gameplay::PlayerState initial_player{
+        .room =
+            oracle::core::WorldRoomId{
+                .area = player_group,
+                .room = center_room,
+            },
+        .local_x = large_room_mode
+            ? rooms.front().layout.pixel_width() * 0.5
+            : oracle::content::small_room_world_width * 0.5,
+        .local_y = large_room_mode
+            ? rooms.front().layout.pixel_height() * 0.5
+            : oracle::content::small_room_world_height * 0.5,
+    };
+    if (
+        player_mode &&
+        !oracle::gameplay::PlayerTraversal::place_near(
+            initial_player,
+            initial_player.local_x,
+            initial_player.local_y,
+            collision_lookup)) {
+        throw std::runtime_error{
+            "no traversable player start was found near the room center"};
+    }
+    auto previous_player = initial_player;
+    auto current_player = initial_player;
+
+    const auto center_x = player_mode
+        ? oracle::gameplay::PlayerTraversal::world_x(initial_player)
+        : large_room_mode
         ? rooms.front().layout.pixel_width() * 0.5
         : atlas_mode
         ? oracle::content::small_room_world_width * 8.0
@@ -1016,7 +1131,9 @@ int run_window(
               (center_room & 0x0f) *
                   oracle::content::small_room_world_width +
               oracle::content::small_room_world_width / 2);
-    const auto center_y = large_room_mode
+    const auto center_y = player_mode
+        ? oracle::gameplay::PlayerTraversal::world_y(initial_player)
+        : large_room_mode
         ? rooms.front().layout.pixel_height() * 0.5
         : atlas_mode
         ? oracle::content::small_room_world_height * 8.0
@@ -1067,6 +1184,8 @@ int run_window(
                     .zoom = initial_zoom,
                 };
                 current = previous;
+                previous_player = initial_player;
+                current_player = initial_player;
             } else if (
                 event.type == SDL_EVENT_KEY_DOWN &&
                 event.key.key == SDLK_F1 &&
@@ -1094,6 +1213,7 @@ int run_window(
         const bool* keyboard = SDL_GetKeyboardState(nullptr);
         while (accumulator >= logic_step) {
             previous = current;
+            previous_player = current_player;
             const auto pan_speed = 150.0 / current.zoom;
             const auto horizontal =
                 (keyboard[SDL_SCANCODE_D] ||
@@ -1105,8 +1225,26 @@ int run_window(
                  keyboard[SDL_SCANCODE_DOWN] ? 1.0 : 0.0) -
                 (keyboard[SDL_SCANCODE_W] ||
                  keyboard[SDL_SCANCODE_UP] ? 1.0 : 0.0);
-            current.x += horizontal * pan_speed * logic_step;
-            current.y += vertical * pan_speed * logic_step;
+            if (player_mode) {
+                static_cast<void>(
+                    oracle::gameplay::PlayerTraversal::step(
+                        current_player,
+                        oracle::gameplay::MovementInput{
+                            .horizontal = horizontal,
+                            .vertical = vertical,
+                        },
+                        logic_step,
+                        collision_lookup));
+                current.x =
+                    oracle::gameplay::PlayerTraversal::world_x(
+                        current_player);
+                current.y =
+                    oracle::gameplay::PlayerTraversal::world_y(
+                        current_player);
+            } else {
+                current.x += horizontal * pan_speed * logic_step;
+                current.y += vertical * pan_speed * logic_step;
+            }
             accumulator -= logic_step;
             ++logic_tick;
         }
@@ -1180,7 +1318,10 @@ int run_window(
                 render_camera,
                 output_width,
                 output_height,
-                center_room);
+                player_mode
+                    ? static_cast<std::uint8_t>(
+                          current_player.room.room)
+                    : center_room);
         } else {
             const SDL_FRect destination{
                 .x = static_cast<float>(
@@ -1207,7 +1348,10 @@ int run_window(
                 render_camera,
                 output_width,
                 output_height,
-                center_room);
+                player_mode
+                    ? static_cast<std::uint8_t>(
+                          current_player.room.room)
+                    : center_room);
         }
         if (collision_overlay) {
             render_collision_overlay(
@@ -1218,14 +1362,33 @@ int run_window(
                 output_width,
                 output_height);
         }
+        if (player_mode) {
+            render_player(
+                renderer,
+                timing.interpolate(
+                    oracle::gameplay::PlayerTraversal::world_x(
+                        previous_player),
+                    oracle::gameplay::PlayerTraversal::world_x(
+                        current_player)),
+                timing.interpolate(
+                    oracle::gameplay::PlayerTraversal::world_y(
+                        previous_player),
+                    oracle::gameplay::PlayerTraversal::world_y(
+                        current_player)),
+                current_player.facing,
+                render_camera,
+                output_width,
+                output_height);
+        }
 
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(renderer, 8, 10, 18, 210);
         const SDL_FRect panel{12.0f, 12.0f, 560.0f, 78.0f};
         SDL_RenderFillRect(renderer, &panel);
         SDL_SetRenderDrawColor(renderer, 232, 238, 248, SDL_ALPHA_OPAQUE);
-        const std::string line_one =
-            "Authentic ROM pixels | WASD/arrows: pan | wheel: zoom";
+        const std::string line_one = player_mode
+            ? "ROM traversal | WASD/arrows: move | wheel: zoom"
+            : "Authentic ROM pixels | WASD/arrows: pan | wheel: zoom";
         const std::string line_two =
             diagnostic
             ? "F1: authentic view | R: reset | mode: diagnostic"
@@ -1416,6 +1579,10 @@ int main(int argc, char* argv[]) {
             throw std::invalid_argument{
                 "large-layout groups use individual rooms, not an atlas"};
         }
+        const bool player_mode =
+            !atlas_mode &&
+            !describe_only &&
+            !region_output_path.has_value();
         const auto rooms = large_room_mode
             ? decode_world_room(
                   layout_decoder,
@@ -1425,7 +1592,7 @@ int main(int argc, char* argv[]) {
                   center_room,
                   season,
                   room_flags)
-            : atlas_mode
+            : atlas_mode || player_mode
             ? decode_world_rectangle(
                   layout_decoder,
                   pixel_decoder,
@@ -1479,6 +1646,7 @@ int main(int argc, char* argv[]) {
             center_room,
             atlas_mode,
             large_room_mode,
+            player_mode,
             collisions,
             authentic_region ? &*authentic_region : nullptr,
             animation_tick,
@@ -1505,6 +1673,7 @@ int main(int argc, char* argv[]) {
             center_room,
             atlas_mode,
             large_room_mode,
+            player_mode,
             force_diagnostic,
             force_collision_overlay,
             animation_tick,

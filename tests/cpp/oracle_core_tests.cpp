@@ -13,6 +13,7 @@
 #include "oracle/content/room_pixels.h"
 #include "oracle/content/room_topology.h"
 #include "oracle/experience_settings.h"
+#include "oracle/gameplay/player_traversal.h"
 #include "oracle/core/item_campaign_policy.h"
 #include "oracle/core/item_runtime.h"
 #include "oracle/presentation/camera.h"
@@ -480,6 +481,108 @@ void test_spatial_room_seams() {
         "large-layout groups do not infer grid seams");
 }
 
+void test_player_traversal() {
+    using oracle::content::RoomCollisionMap;
+    using oracle::core::WorldRoomId;
+    using oracle::gameplay::MovementInput;
+    using oracle::gameplay::PlayerState;
+    using oracle::gameplay::PlayerTraversal;
+
+    std::array<RoomCollisionMap, 2> maps{
+        RoomCollisionMap{
+            .id = WorldRoomId{.area = 0, .room = 0x91},
+            .columns = 10,
+            .rows = 8,
+            .values = std::vector<std::uint8_t>(80, 0),
+        },
+        RoomCollisionMap{
+            .id = WorldRoomId{.area = 0, .room = 0x92},
+            .columns = 10,
+            .rows = 8,
+            .values = std::vector<std::uint8_t>(80, 0),
+        },
+    };
+    const auto lookup =
+        [&](const WorldRoomId id) -> const RoomCollisionMap* {
+            for (const auto& map : maps) {
+                if (map.id == id) {
+                    return &map;
+                }
+            }
+            return nullptr;
+        };
+
+    PlayerState player{
+        .room = WorldRoomId{.area = 0, .room = 0x91},
+        .local_x = 155.0,
+        .local_y = 64.0,
+    };
+    const auto seam_step =
+        PlayerTraversal::step(
+            player,
+            MovementInput{.horizontal = 1.0},
+            0.2,
+            lookup);
+    check(seam_step.moved, "player moves through clear collision data");
+    check(
+        seam_step.crossed_room_seam &&
+            player.room.room == 0x92,
+        "player movement crosses an available east room seam");
+    check(
+        player.local_x < 16.0,
+        "seam crossing wraps to destination-local coordinates");
+
+    player =
+        PlayerState{
+            .room = WorldRoomId{.area = 0, .room = 0x91},
+            .local_x = 152.0,
+            .local_y = 64.0,
+        };
+    maps[1].values[4 * 10] = 0x0f;
+    const auto blocked_seam =
+        PlayerTraversal::step(
+            player,
+            MovementInput{.horizontal = 1.0},
+            0.2,
+            lookup);
+    check(
+        blocked_seam.blocked && player.room.room == 0x91,
+        "destination-room collision blocks a seam crossing");
+
+    maps[0].values[2 * 10 + 2] = 0x0f;
+    player =
+        PlayerState{
+            .room = WorldRoomId{.area = 0, .room = 0x91},
+            .local_x = 28.0,
+            .local_y = 40.0,
+        };
+    static_cast<void>(
+        PlayerTraversal::step(
+            player,
+            MovementInput{.horizontal = 1.0},
+            0.5,
+            lookup));
+    check(
+        player.local_x < 28.1,
+        "substepped traversal cannot tunnel through a solid metatile");
+
+    const auto packed =
+        PlayerTraversal::from_packed_room_position(
+            WorldRoomId{.area = 2, .room = 0x9f},
+            0x44);
+    check_close(
+        packed.local_x,
+        72.0,
+        "packed warp X converts to metatile center");
+    check_close(
+        packed.local_y,
+        56.0,
+        "packed warp Y accounts for the status-bar row");
+    check(
+        PlayerTraversal::packed_room_position(packed) == 0x44,
+        "packed warp position conversion round-trips");
+}
+
 }  // namespace
 
 int main() {
@@ -492,6 +595,7 @@ int main() {
     test_room_tile_replacements();
     test_room_collision_shapes();
     test_spatial_room_seams();
+    test_player_traversal();
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
         return EXIT_FAILURE;
