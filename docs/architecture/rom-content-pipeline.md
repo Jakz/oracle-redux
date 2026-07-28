@@ -74,3 +74,10 @@ four 8×8 tile references and attributes, loads the corresponding 2-bit tile
 pixels and Game Boy Color palettes from the ROM Source, and uploads the
 resulting atlas to the renderer. Dynamic tile substitutions and animated tiles
 remain separate later stages.
+
+That composed RGBA path is a diagnostic output, not the production content
+boundary. Production decoding publishes exact tile color indices, tile
+attributes, palette domains, palette selections, and decoded palette entries.
+The SDL GPU backend uploads indexed atlases and palette-table data. Palette
+changes can therefore preserve the original tile atlas and update only palette
+state.

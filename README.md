@@ -280,6 +280,21 @@ Room adjacency, warp records, and graph navigation are documented in
 The current player coordinate, collision-body, and seamless traversal model is
 documented in
 [`docs/architecture/player-traversal.md`](docs/architecture/player-traversal.md).
+The shared Semantic UI Model and dual Fidelity/Modern retained layouts are
+documented in
+[`docs/architecture/ui.md`](docs/architecture/ui.md).
+The sandboxed original sound-driver boundary and Blargg CPU/APU integration are
+documented in
+[`docs/architecture/audio.md`](docs/architecture/audio.md).
+Stable message identities, semantic control tokens, and localization-pack
+fallback are documented in
+[`docs/architecture/localization.md`](docs/architecture/localization.md).
+Deterministic logic-tick input and replaceable device bindings are documented
+in
+[`docs/architecture/input.md`](docs/architecture/input.md).
+The assessed First Playable milestones, acceptance criteria, and principal
+risks are documented in
+[`docs/architecture/implementation-sequence.md`](docs/architecture/implementation-sequence.md).
 Live warp-tile recognition, transition resolution, and destination streaming
 are documented in
 [`docs/architecture/live-room-transitions.md`](docs/architecture/live-room-transitions.md).
@@ -287,6 +302,9 @@ The original Link sprite pipeline is documented in
 [`docs/reverse-engineering/link-sprite-rendering.md`](docs/reverse-engineering/link-sprite-rendering.md),
 and the dynamic room-object boundary in
 [`docs/reverse-engineering/room-objects.md`](docs/reverse-engineering/room-objects.md).
+The original interaction, movement, and simple-script bytecode formats and
+their planned native C++ execution boundary are documented in
+[`docs/reverse-engineering/campaign-script-format.md`](docs/reverse-engineering/campaign-script-format.md).
 
 Windows developers can instead open the maintained solution at
 [`projects/msvc/oracle-redux.sln`](projects/msvc/oracle-redux.sln).

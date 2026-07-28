@@ -1,6 +1,6 @@
 # Model enhancements as profiles and capabilities
 
-Status: Accepted
+Status: Accepted; Modern Profile defaults amended by ADR-0008
 
 ## Context
 

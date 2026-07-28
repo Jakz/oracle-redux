@@ -56,11 +56,11 @@ implemented intentionally.
 The initial Classic Profile defaults to one active room, two item action slots,
 pixel-perfect output, and no interpolated or atmospheric passes.
 
-The provisional Modern Profile enables a seamless simulation region, six item
-action slots, interpolated rendering, continuous world composition, lighting,
-fog, and color grading. These are defaults, not a locked bundle. In particular,
-a player can use widescreen and smooth scrolling while retaining classic room
-activation.
+The Modern Profile enables interpolated rendering, continuous world
+composition, scalable interface, lighting, fog, and color grading while
+retaining Fidelity Baseline gameplay rules. A seamless multi-room simulation
+region, expanded item actions, and other outcome-changing behavior are separate
+explicit Gameplay Extensions rather than presentation defaults.
 
 Gameplay-affecting choices belong in save/replay metadata. Pure presentation
 choices do not affect deterministic state.
@@ -76,11 +76,12 @@ The first decoded-room renderer spike must demonstrate:
 
 1. a multi-room tile scene at arbitrary window sizes;
 2. smooth camera interpolation at a display rate above the logic rate;
-3. pixel-perfect and filtered scaling as separate choices;
+3. pixel-perfect magnification and palette-resolved downsampling as separate
+   choices;
 4. one optional lighting pass and independently scaled UI;
 5. deterministic headless tests continuing to pass without the backend.
 
-## Implementation sequence
+## Historical exploration sequence
 
 1. Decode one overworld room and its neighbors into stable asset and topology
    structures. **Initial metatile layout slice complete.**
@@ -97,3 +98,8 @@ The first decoded-room renderer spike must demonstrate:
 
 This ordering gives the reverse-engineered rules a working visual host early
 without coupling their correctness to the final renderer.
+
+The exploration above produced the current diagnostic room and traversal
+slices. The assessed production sequence now prioritizes a dual-campaign First
+Playable and is maintained in
+`docs/architecture/implementation-sequence.md`.
