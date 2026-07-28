@@ -46,7 +46,7 @@
   <PropertyGroup>
     <TargetName>oracle_room_slice</TargetName>
     <LocalDebuggerWorkingDirectory>$(OracleRoot)</LocalDebuggerWorkingDirectory>
-    <LocalDebuggerCommandArguments>&quot;$(OracleRoot)roms\Legend of Zelda, The - Oracle of Ages (USA).gbc&quot;</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>&quot;$(OracleRoot)roms\Legend of Zelda, The - Oracle of Ages (USA).gbc&quot; --vasu-scenario</LocalDebuggerCommandArguments>
   </PropertyGroup>
 
   <ItemDefinitionGroup>

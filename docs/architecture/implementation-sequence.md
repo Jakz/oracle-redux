@@ -33,6 +33,20 @@ direct SDL GPU production renderer later
 The next implementation slice should make one ROM-defined interaction playable
 in each campaign while using the current diagnostic renderer.
 
+### Stage status
+
+The first committed stage selects the shared Vasu family in Ages `02:ee` and
+Seasons `01:91`. It now includes semantic tick input, original bounded actor
+bands, room-record instantiation, interaction targeting, cartridge text
+decompression, authentic Vasu/snakes graphics and OAM, ground-anchor ordering,
+a minimal dialogue model, deterministic headless replay, and a
+`--vasu-scenario` bootstrap.
+
+The typed Vasu behavior currently covers the documented post-ring-box,
+no-rings branch. The general Native Script Runtime and validated Original State
+Keys remain required before this immediate slice is complete. See
+[`../reverse-engineering/vasu-interaction-slice.md`](../reverse-engineering/vasu-interaction-slice.md).
+
 ### Scope
 
 1. Add the backend-neutral `InputFrame` and adapt current SDL input to produce

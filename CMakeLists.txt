@@ -20,7 +20,14 @@ add_library(oracle_experience
 target_include_directories(oracle_experience PUBLIC include)
 target_compile_features(oracle_experience PUBLIC cxx_std_20)
 
+add_library(oracle_input
+    src/input/input_frame.cpp
+)
+target_include_directories(oracle_input PUBLIC include)
+target_compile_features(oracle_input PUBLIC cxx_std_20)
+
 add_library(oracle_core
+    src/core/actor_slot_domain.cpp
     src/core/item_campaign_policy.cpp
     src/core/item_runtime.cpp
     src/core/simulation_region.cpp
@@ -30,8 +37,10 @@ target_compile_features(oracle_core PUBLIC cxx_std_20)
 target_link_libraries(oracle_core PUBLIC oracle_experience)
 
 add_library(oracle_content
+    src/content/interaction_sprite.cpp
     src/content/link_sprite.cpp
     src/content/rom_source.cpp
+    src/content/rom_text.cpp
     src/content/room_objects.cpp
     src/content/room_collisions.cpp
     src/content/room_layout.cpp
@@ -44,11 +53,14 @@ target_compile_features(oracle_content PUBLIC cxx_std_20)
 target_link_libraries(oracle_content PUBLIC oracle_core)
 
 add_library(oracle_gameplay
+    src/gameplay/interaction_target.cpp
     src/gameplay/player_traversal.cpp
+    src/gameplay/room_actor_loader.cpp
+    src/gameplay/vasu_interaction.cpp
 )
 target_include_directories(oracle_gameplay PUBLIC include)
 target_compile_features(oracle_gameplay PUBLIC cxx_std_20)
-target_link_libraries(oracle_gameplay PUBLIC oracle_content)
+target_link_libraries(oracle_gameplay PUBLIC oracle_content oracle_input)
 
 add_library(oracle_presentation
     src/presentation/camera.cpp
@@ -61,12 +73,14 @@ target_link_libraries(oracle_presentation PUBLIC oracle_experience)
 
 if(MSVC)
     target_compile_options(oracle_experience PRIVATE /W4 /permissive-)
+    target_compile_options(oracle_input PRIVATE /W4 /permissive-)
     target_compile_options(oracle_core PRIVATE /W4 /permissive-)
     target_compile_options(oracle_content PRIVATE /W4 /permissive-)
     target_compile_options(oracle_gameplay PRIVATE /W4 /permissive-)
     target_compile_options(oracle_presentation PRIVATE /W4 /permissive-)
 else()
     target_compile_options(oracle_experience PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(oracle_input PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(oracle_core PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(oracle_content PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(oracle_gameplay PRIVATE -Wall -Wextra -Wpedantic)

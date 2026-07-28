@@ -20,7 +20,9 @@
 #include <vector>
 
 #include "oracle/content/link_sprite.h"
+#include "oracle/content/interaction_sprite.h"
 #include "oracle/content/rom_source.h"
+#include "oracle/content/rom_text.h"
 #include "oracle/content/room_collisions.h"
 #include "oracle/content/room_layout.h"
 #include "oracle/content/room_mutations.h"
@@ -28,7 +30,11 @@
 #include "oracle/content/room_pixels.h"
 #include "oracle/content/room_topology.h"
 #include "oracle/core/campaign.h"
+#include "oracle/core/actor_slot_domain.h"
 #include "oracle/gameplay/player_traversal.h"
+#include "oracle/gameplay/room_actor_loader.h"
+#include "oracle/gameplay/vasu_interaction.h"
+#include "oracle/input/input_frame.h"
 #include "oracle/presentation/frame_timing.h"
 
 namespace {
@@ -430,6 +436,211 @@ void render_player(
         .h = half_height * 2.0f,
     };
     SDL_RenderTexture(renderer, texture, nullptr, &sprite);
+}
+
+std::optional<oracle::input::InputAction> semantic_action(
+    const SDL_Keycode key) {
+    using oracle::input::InputAction;
+    switch (key) {
+    case SDLK_W:
+    case SDLK_UP:
+        return InputAction::up;
+    case SDLK_S:
+    case SDLK_DOWN:
+        return InputAction::down;
+    case SDLK_A:
+    case SDLK_LEFT:
+        return InputAction::left;
+    case SDLK_D:
+    case SDLK_RIGHT:
+        return InputAction::right;
+    case SDLK_Z:
+    case SDLK_SPACE:
+        return InputAction::a;
+    case SDLK_X:
+        return InputAction::b;
+    case SDLK_RETURN:
+        return InputAction::confirm;
+    case SDLK_BACKSPACE:
+        return InputAction::cancel;
+    default:
+        return std::nullopt;
+    }
+}
+
+std::size_t vasu_texture_index(const std::uint8_t subid) {
+    if (subid == 0) {
+        return 0;
+    }
+    if (subid == 1) {
+        return 1;
+    }
+    return 2;
+}
+
+void render_vasu_actors(
+    SDL_Renderer* renderer,
+    const std::array<SDL_Texture*, 3>& textures,
+    const oracle::content::InteractionSpriteDecoder& sprite_decoder,
+    const oracle::core::ActorSlotDomain& actors,
+    const std::vector<RoomPlacement>& rooms,
+    const oracle::gameplay::PlayerState& player,
+    const bool in_front_of_player,
+    const std::uint64_t animation_tick,
+    const CameraState camera,
+    const int output_width,
+    const int output_height) {
+    constexpr std::int32_t texture_size = 64;
+    const auto player_world_y =
+        oracle::gameplay::PlayerTraversal::world_y(player);
+    for (const auto& actor :
+         actors.slots(oracle::core::ActorCategory::interaction)) {
+        if (
+            !actor.active ||
+            !actor.positioned ||
+            actor.identity.id != 0x89 ||
+            (
+                actor.identity.subid != 0 &&
+                actor.identity.subid != 1 &&
+                actor.identity.subid != 6)) {
+            continue;
+        }
+        const auto placement = std::find_if(
+            rooms.begin(),
+            rooms.end(),
+            [&](const RoomPlacement& candidate) {
+                return candidate.layout.id == actor.room;
+            });
+        if (placement == rooms.end()) {
+            continue;
+        }
+        const auto world_x =
+            placement->world_x + actor.local_x;
+        const auto world_y =
+            placement->world_y + actor.local_y;
+        if ((world_y > player_world_y) != in_front_of_player) {
+            continue;
+        }
+        const auto frame = sprite_decoder.decode_vasu(
+            actor.identity.subid,
+            animation_tick);
+        if (
+            frame.width > texture_size ||
+            frame.height > texture_size) {
+            throw std::runtime_error{
+                "Vasu sprite exceeds its diagnostic texture"};
+        }
+        std::array<oracle::content::RgbaPixel, texture_size * texture_size>
+            upload{};
+        for (std::int32_t y = 0; y < frame.height; ++y) {
+            std::copy_n(
+                frame.pixels.begin() +
+                    static_cast<std::size_t>(y * frame.width),
+                frame.width,
+                upload.begin() +
+                    static_cast<std::size_t>(y * texture_size));
+        }
+        auto* texture = textures[vasu_texture_index(actor.identity.subid)];
+        if (!SDL_UpdateTexture(
+                texture,
+                nullptr,
+                upload.data(),
+                texture_size *
+                    static_cast<int>(
+                        sizeof(oracle::content::RgbaPixel)))) {
+            throw std::runtime_error{
+                std::string{"Vasu texture upload failed: "} +
+                SDL_GetError()};
+        }
+
+        const auto screen_x = static_cast<float>(
+            (world_x - camera.x) * camera.zoom +
+            output_width * 0.5);
+        const auto screen_y = static_cast<float>(
+            (world_y - camera.y) * camera.zoom +
+            output_height * 0.5);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, 4, 10, 14, 130);
+        const SDL_FRect shadow{
+            screen_x - static_cast<float>(5.0 * camera.zoom),
+            screen_y - static_cast<float>(1.0 * camera.zoom),
+            static_cast<float>(10.0 * camera.zoom),
+            std::max(2.0f, static_cast<float>(3.0 * camera.zoom)),
+        };
+        SDL_RenderFillRect(renderer, &shadow);
+        const SDL_FRect source{
+            0.0f,
+            0.0f,
+            static_cast<float>(frame.width),
+            static_cast<float>(frame.height),
+        };
+        const SDL_FRect destination{
+            screen_x +
+                static_cast<float>(frame.origin_x * camera.zoom),
+            screen_y +
+                static_cast<float>(frame.origin_y * camera.zoom),
+            static_cast<float>(frame.width * camera.zoom),
+            static_cast<float>(frame.height * camera.zoom),
+        };
+        SDL_RenderTexture(renderer, texture, &source, &destination);
+    }
+}
+
+void render_dialogue(
+    SDL_Renderer* renderer,
+    const oracle::ui::DialogueModel& dialogue,
+    const int output_width,
+    const int output_height) {
+    if (!dialogue.visible) {
+        return;
+    }
+    const auto width = std::min(640.0f, output_width - 32.0f);
+    const auto height = std::min(180.0f, output_height - 32.0f);
+    const SDL_FRect box{
+        (output_width - width) * 0.5f,
+        output_height - height - 16.0f,
+        width,
+        height,
+    };
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 8, 12, 24, 240);
+    SDL_RenderFillRect(renderer, &box);
+    SDL_SetRenderDrawColor(renderer, 238, 232, 210, 255);
+    SDL_RenderRect(renderer, &box);
+
+    std::istringstream lines{dialogue.page_text};
+    std::string line;
+    float y = box.y + 18.0f;
+    while (std::getline(lines, line) && y < box.y + box.h - 34.0f) {
+        SDL_RenderDebugText(renderer, box.x + 20.0f, y, line.c_str());
+        y += 16.0f;
+    }
+    if (!dialogue.options.empty()) {
+        std::ostringstream selection;
+        selection << "Choice: ";
+        for (std::size_t index = 0;
+             index < dialogue.options.size();
+             ++index) {
+            selection
+                << (index == dialogue.selected_option ? "> " : "  ")
+                << dialogue.options[index].label;
+            if (index + 1 != dialogue.options.size()) {
+                selection << "   ";
+            }
+        }
+        const auto text = selection.str();
+        SDL_RenderDebugText(
+            renderer,
+            box.x + 20.0f,
+            box.y + box.h - 28.0f,
+            text.c_str());
+    } else {
+        SDL_RenderDebugText(
+            renderer,
+            box.x + box.w - 116.0f,
+            box.y + box.h - 28.0f,
+            "Z/Enter: next");
+    }
 }
 
 void render_object_anchors(
@@ -1255,6 +1466,9 @@ int run_window(
     SDL_SetRenderVSync(renderer, 1);
 
     const oracle::content::LinkSpriteDecoder link_sprite_decoder{rom};
+    const oracle::content::InteractionSpriteDecoder
+        interaction_sprite_decoder{rom};
+    const oracle::content::RomTextDecoder text_decoder{rom};
     SDL_Texture* link_texture = SDL_CreateTexture(
         renderer,
         SDL_PIXELFORMAT_RGBA32,
@@ -1269,6 +1483,22 @@ int run_window(
     SDL_SetTextureScaleMode(link_texture, SDL_SCALEMODE_NEAREST);
     SDL_SetTextureBlendMode(link_texture, SDL_BLENDMODE_BLEND);
     std::optional<std::uint8_t> uploaded_link_frame;
+    std::array<SDL_Texture*, 3> vasu_textures{};
+    for (auto*& texture : vasu_textures) {
+        texture = SDL_CreateTexture(
+            renderer,
+            SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STREAMING,
+            64,
+            64);
+        if (texture == nullptr) {
+            throw std::runtime_error{
+                std::string{"Vasu texture creation failed: "} +
+                SDL_GetError()};
+        }
+        SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    }
 
     SDL_Texture* region_texture = nullptr;
     if (authentic_region.has_value()) {
@@ -1341,6 +1571,14 @@ int run_window(
             ? rooms.front().layout.pixel_height() * 0.5
             : oracle::content::small_room_world_height * 0.5,
     };
+    const auto selected_vasu_scenario =
+        oracle::gameplay::vasu_scenario(rom.metadata().campaign);
+    if (
+        spawn_position == selected_vasu_scenario.player_spawn_yx &&
+        initial_player.room == selected_vasu_scenario.room) {
+        initial_player.facing =
+            oracle::gameplay::PlayerFacing::north;
+    }
     if (
         player_mode &&
         !spawn_position.has_value() &&
@@ -1400,6 +1638,24 @@ int run_window(
         player_group,
         center_room,
         room_flags);
+    oracle::core::ActorSlotDomain current_actors;
+    auto actor_load_report =
+        oracle::gameplay::RoomActorLoader::load(
+            current_objects,
+            current_actors);
+    oracle::gameplay::VasuInteractionRuntime vasu_runtime;
+    oracle::input::SemanticInputSampler semantic_input;
+    const auto reload_current_objects = [&]() {
+        current_objects = object_decoder.decode(
+            static_cast<std::uint8_t>(current_player.room.area),
+            static_cast<std::uint8_t>(current_player.room.room),
+            room_flags);
+        current_actors.clear();
+        actor_load_report =
+            oracle::gameplay::RoomActorLoader::load(
+                current_objects,
+                current_actors);
+    };
 
     const auto rebuild_region_texture = [&]() {
         SDL_DestroyTexture(region_texture);
@@ -1480,12 +1736,7 @@ int run_window(
             }
             previous_player = current_player;
             initial_player = current_player;
-            current_objects = object_decoder.decode(
-                static_cast<std::uint8_t>(
-                    current_player.room.area),
-                static_cast<std::uint8_t>(
-                    current_player.room.room),
-                room_flags);
+            reload_current_objects();
             current.x =
                 oracle::gameplay::PlayerTraversal::world_x(
                     current_player);
@@ -1519,6 +1770,18 @@ int run_window(
     while (running) {
         SDL_Event event{};
         while (SDL_PollEvent(&event)) {
+            if (
+                event.type == SDL_EVENT_KEY_DOWN ||
+                event.type == SDL_EVENT_KEY_UP) {
+                const auto action = semantic_action(event.key.key);
+                if (action.has_value()) {
+                    semantic_input.set(
+                        *action,
+                        event.type == SDL_EVENT_KEY_DOWN);
+                }
+            } else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+                semantic_input.release_all();
+            }
             if (event.type == SDL_EVENT_QUIT) {
                 running = false;
             } else if (
@@ -1550,12 +1813,7 @@ int run_window(
                 current = previous;
                 previous_player = initial_player;
                 current_player = initial_player;
-                current_objects = object_decoder.decode(
-                    static_cast<std::uint8_t>(
-                        current_player.room.area),
-                    static_cast<std::uint8_t>(
-                        current_player.room.room),
-                    room_flags);
+                reload_current_objects();
             } else if (
                 event.type == SDL_EVENT_KEY_DOWN &&
                 event.key.key == SDLK_F1 &&
@@ -1584,39 +1842,45 @@ int run_window(
         last_counter = now;
         accumulator += elapsed;
 
-        const bool* keyboard = SDL_GetKeyboardState(nullptr);
         while (accumulator >= logic_step) {
             previous = current;
             previous_player = current_player;
+            const auto input_frame = semantic_input.sample();
             const auto pan_speed = 150.0 / current.zoom;
             const auto horizontal =
-                (keyboard[SDL_SCANCODE_D] ||
-                 keyboard[SDL_SCANCODE_RIGHT] ? 1.0 : 0.0) -
-                (keyboard[SDL_SCANCODE_A] ||
-                 keyboard[SDL_SCANCODE_LEFT] ? 1.0 : 0.0);
+                (input_frame.held(
+                     oracle::input::InputAction::right) ? 1.0 : 0.0) -
+                (input_frame.held(
+                     oracle::input::InputAction::left) ? 1.0 : 0.0);
             const auto vertical =
-                (keyboard[SDL_SCANCODE_S] ||
-                 keyboard[SDL_SCANCODE_DOWN] ? 1.0 : 0.0) -
-                (keyboard[SDL_SCANCODE_W] ||
-                 keyboard[SDL_SCANCODE_UP] ? 1.0 : 0.0);
+                (input_frame.held(
+                     oracle::input::InputAction::down) ? 1.0 : 0.0) -
+                (input_frame.held(
+                     oracle::input::InputAction::up) ? 1.0 : 0.0);
             if (player_mode) {
+                vasu_runtime.update(
+                    input_frame,
+                    current_player,
+                    current_actors,
+                    text_decoder);
                 const auto traversal =
                     oracle::gameplay::PlayerTraversal::step(
                         current_player,
                         oracle::gameplay::MovementInput{
-                            .horizontal = horizontal,
-                            .vertical = vertical,
+                            .horizontal =
+                                vasu_runtime.captures_input()
+                                ? 0.0
+                                : horizontal,
+                            .vertical =
+                                vasu_runtime.captures_input()
+                                ? 0.0
+                                : vertical,
                         },
                         logic_step,
                         collision_lookup);
                 player_moving = traversal.moved;
                 if (traversal.crossed_room_seam) {
-                    current_objects = object_decoder.decode(
-                        static_cast<std::uint8_t>(
-                            current_player.room.area),
-                        static_cast<std::uint8_t>(
-                            current_player.room.room),
-                        room_flags);
+                    reload_current_objects();
                 }
                 warp_cooldown =
                     std::max(0.0, warp_cooldown - logic_step);
@@ -1861,6 +2125,18 @@ int run_window(
                 output_height);
         }
         if (player_mode) {
+            render_vasu_actors(
+                renderer,
+                vasu_textures,
+                interaction_sprite_decoder,
+                current_actors,
+                rooms,
+                current_player,
+                false,
+                logic_tick,
+                render_camera,
+                output_width,
+                output_height);
             const auto link_frame = link_sprite_decoder.decode(
                 link_direction(current_player.facing),
                 player_moving,
@@ -1897,6 +2173,18 @@ int run_window(
                 render_camera,
                 output_width,
                 output_height);
+            render_vasu_actors(
+                renderer,
+                vasu_textures,
+                interaction_sprite_decoder,
+                current_actors,
+                rooms,
+                current_player,
+                true,
+                logic_tick,
+                render_camera,
+                output_width,
+                output_height);
         }
 
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
@@ -1905,7 +2193,7 @@ int run_window(
         SDL_RenderFillRect(renderer, &panel);
         SDL_SetRenderDrawColor(renderer, 232, 238, 248, SDL_ALPHA_OPAQUE);
         const std::string line_one = player_mode
-            ? "ROM traversal | WASD/arrows: move | wheel: zoom"
+            ? "ROM runtime | WASD/arrows: move | Z/Enter: talk | X: back"
             : "Authentic ROM pixels | WASD/arrows: pan | wheel: zoom";
         const std::string line_two =
             diagnostic
@@ -1920,7 +2208,12 @@ int run_window(
             << (object_overlay
                     ? "F3: hide object anchors"
                     : "F3: show object anchors")
-            << " (" << current_objects.records.size() << ')';
+            << " | actors " << actor_load_report.spawned.size();
+        if (!actor_load_report.failures.empty()) {
+            diagnostic_line
+                << " (" << actor_load_report.failures.size()
+                << " slot failures)";
+        }
         std::ostringstream status_line;
         if (player_mode) {
             status_line
@@ -1953,6 +2246,11 @@ int run_window(
             const auto text = status_line.str();
             SDL_RenderDebugText(renderer, 22.0f, 83.0f, text.c_str());
         }
+        render_dialogue(
+            renderer,
+            vasu_runtime.model(),
+            output_width,
+            output_height);
         if (
             screenshot_path.has_value() &&
             logic_tick >= screenshot_ready_tick) {
@@ -1977,6 +2275,9 @@ int run_window(
     }
 
     SDL_DestroyTexture(link_texture);
+    for (auto* texture : vasu_textures) {
+        SDL_DestroyTexture(texture);
+    }
     SDL_DestroyTexture(region_texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyGPUDevice(gpu_device);
@@ -1998,6 +2299,7 @@ int main(int argc, char* argv[]) {
                    "[--collisions] [--objects] "
                    "[--list-exits] [--follow-exit N] "
                    "[--catalog-topology] [--catalog-objects] "
+                   "[--vasu-scenario] "
                    "[--spawn-yx HEX] "
                    "[--tick N] [--room-flags HEX] "
                    "[--describe] [--screenshot PATH]\n";
@@ -2014,6 +2316,7 @@ int main(int argc, char* argv[]) {
         bool atlas_mode = false;
         bool catalog_topology = false;
         bool catalog_objects = false;
+        bool vasu_scenario_mode = false;
         std::optional<std::size_t> follow_exit_index;
         std::optional<std::uint8_t> spawn_position;
         auto season = oracle::content::Season::spring;
@@ -2041,6 +2344,8 @@ int main(int argc, char* argv[]) {
             } else if (argument == "--catalog-objects") {
                 catalog_objects = true;
                 describe_only = true;
+            } else if (argument == "--vasu-scenario") {
+                vasu_scenario_mode = true;
             } else if (
                 argument == "--follow-exit" &&
                 index + 1 < argc) {
@@ -2090,6 +2395,17 @@ int main(int argc, char* argv[]) {
         }
 
         const auto rom = oracle::content::RomSource::load(rom_path);
+        if (vasu_scenario_mode) {
+            const auto scenario =
+                oracle::gameplay::vasu_scenario(
+                    rom.metadata().campaign);
+            world_group =
+                static_cast<std::uint8_t>(scenario.room.area);
+            center_room =
+                static_cast<std::uint8_t>(scenario.room.room);
+            spawn_position = scenario.player_spawn_yx;
+            force_object_overlay = false;
+        }
         const oracle::content::RoomLayoutDecoder layout_decoder{rom};
         const oracle::content::RoomPixelDecoder pixel_decoder{rom};
         const oracle::content::RoomCollisionDecoder collision_decoder{rom};

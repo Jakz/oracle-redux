@@ -119,6 +119,11 @@ The scaffold currently contains:
   OAM-composition, animation-frame, and sprite-palette tables;
 - typed room-object bytecode catalogs for interactions, enemies, parts, and
   item drops, with original spawn coordinates and diagnostic anchors;
+- tick-sampled backend-neutral Input Frames and original-size bounded actor
+  slot bands with deterministic lowest-slot allocation;
+- a dual-campaign Vasu developer scenario with ROM-decoded Vasu/snakes OAM,
+  recursive text dictionaries, semantic dialogue pages/options, and replayed
+  interaction input;
 - live ROM tile-warp and vertical screen-edge execution with destination-group
   loading, transition-aware placement, and warp re-entry suppression;
 - all 256 small rooms in world groups 0–3, with full-resolution atlas export;
@@ -145,6 +150,8 @@ build/oracle_room_slice "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc"
 Controls:
 
 - in normal launch mode, `WASD` or arrow keys move Link;
+- `Z` or Enter interacts and advances dialogue; directions choose a dialogue
+  option; `X` or Backspace cancels;
 - in `--atlas` mode, `WASD` or arrow keys pan the camera;
 - the mouse wheel zooms between overview and close-up scales;
 - `R` resets the camera;
@@ -153,6 +160,16 @@ Controls:
 - `F3` toggles anchors for ROM room objects whose actual actors are not yet
   simulated and rendered;
 - `Escape` exits.
+
+Launch the first deterministic actor-interaction scenario. The runtime chooses
+the correct Vasu shop for either campaign:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc --vasu-scenario
+```
+
+The scenario and current fidelity boundary are documented in
+[`docs/reverse-engineering/vasu-interaction-slice.md`](docs/reverse-engineering/vasu-interaction-slice.md).
 
 Choose another room by its hexadecimal overworld coordinate:
 

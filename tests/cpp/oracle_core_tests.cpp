@@ -1,11 +1,18 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
+#include "oracle/content/interaction_sprite.h"
+#include "oracle/content/rom_source.h"
+#include "oracle/content/rom_text.h"
+#include "oracle/content/room_objects.h"
+#include "oracle/core/actor_slot_domain.h"
 #include "oracle/core/simulation_region.h"
 #include "oracle/content/room_collisions.h"
 #include "oracle/content/room_layout.h"
@@ -13,7 +20,11 @@
 #include "oracle/content/room_pixels.h"
 #include "oracle/content/room_topology.h"
 #include "oracle/experience_settings.h"
+#include "oracle/gameplay/interaction_target.h"
 #include "oracle/gameplay/player_traversal.h"
+#include "oracle/gameplay/room_actor_loader.h"
+#include "oracle/gameplay/vasu_interaction.h"
+#include "oracle/input/input_frame.h"
 #include "oracle/core/item_campaign_policy.h"
 #include "oracle/core/item_runtime.h"
 #include "oracle/presentation/camera.h"
@@ -37,6 +48,242 @@ void check_close(
     const double expected,
     const std::string_view message) {
     check(std::abs(actual - expected) < 0.000001, message);
+}
+
+oracle::input::InputFrame pressed_frame(
+    const oracle::input::InputAction action) {
+    const auto bit = static_cast<std::uint16_t>(
+        1u << static_cast<std::uint8_t>(action));
+    return oracle::input::InputFrame{bit, bit, 0};
+}
+
+void test_semantic_input_frames() {
+    using oracle::input::InputAction;
+    using oracle::input::SemanticInputSampler;
+
+    SemanticInputSampler sampler;
+    sampler.set(InputAction::right, true);
+    auto frame = sampler.sample();
+    check(frame.held(InputAction::right), "input frame carries held actions");
+    check(
+        frame.pressed(InputAction::right),
+        "input frame carries pressed edges");
+    frame = sampler.sample();
+    check(
+        frame.held(InputAction::right) &&
+            !frame.pressed(InputAction::right),
+        "held input does not repeat its pressed edge");
+
+    sampler.set(InputAction::a, true);
+    sampler.set(InputAction::a, false);
+    frame = sampler.sample();
+    check(
+        frame.pressed(InputAction::a) &&
+            frame.released(InputAction::a) &&
+            !frame.held(InputAction::a),
+        "between-tick taps retain both semantic edges");
+
+    sampler.release_all();
+    frame = sampler.sample();
+    check(
+        frame.released(InputAction::right) &&
+            !frame.held(InputAction::right),
+        "backend reset synthesizes held-action releases");
+}
+
+void test_actor_slot_domain() {
+    using oracle::core::ActorCategory;
+    using oracle::core::ActorIdentity;
+    using oracle::core::ActorSlotDomain;
+    using oracle::core::WorldRoomId;
+
+    ActorSlotDomain actors;
+    const auto interaction = actors.allocate_dynamic(
+        ActorCategory::interaction,
+        ActorIdentity{0x89, 0, 0},
+        WorldRoomId{2, 0xee},
+        0x50,
+        0x18,
+        true,
+        false,
+        0);
+    check(
+        interaction.has_value() && interaction->slot == 2,
+        "dynamic interactions begin after two reserved slots");
+    const auto enemy = actors.allocate_dynamic(
+        ActorCategory::enemy,
+        ActorIdentity{1, 2, 3},
+        WorldRoomId{},
+        0,
+        0,
+        false,
+        false,
+        0);
+    check(
+        enemy.has_value() && enemy->slot == 0,
+        "dynamic enemies begin at their first original slot");
+    const auto item = actors.allocate_dynamic(
+        ActorCategory::item,
+        ActorIdentity{1, 0, 0},
+        WorldRoomId{},
+        0,
+        0,
+        false,
+        false,
+        0);
+    check(
+        item.has_value() && item->slot == 7,
+        "dynamic items retain the original d7-db allocation range");
+
+    const auto stale = *interaction;
+    check(actors.release(stale), "active actor slot releases");
+    const auto replacement = actors.allocate_dynamic(
+        ActorCategory::interaction,
+        ActorIdentity{0x46, 0, 0},
+        WorldRoomId{},
+        0,
+        0,
+        false,
+        false,
+        1);
+    check(
+        replacement.has_value() &&
+            replacement->slot == stale.slot &&
+            replacement->generation != stale.generation &&
+            actors.get(stale) == nullptr,
+        "slot generations reject stale actor handles");
+}
+
+void test_vasu_rom_scenario(
+    const std::filesystem::path& path,
+    const oracle::core::Campaign campaign) {
+    if (!std::filesystem::exists(path)) {
+        return;
+    }
+    using oracle::content::InteractionSpriteDecoder;
+    using oracle::content::RomSource;
+    using oracle::content::RomTextDecoder;
+    using oracle::content::RoomObjectDecoder;
+    using oracle::core::ActorCategory;
+    using oracle::core::ActorSlotDomain;
+    using oracle::gameplay::PlayerFacing;
+    using oracle::gameplay::PlayerTraversal;
+    using oracle::gameplay::RoomActorLoader;
+    using oracle::gameplay::VasuInteractionRuntime;
+    using oracle::input::InputAction;
+
+    const auto rom = RomSource::load(path);
+    check(
+        rom.metadata().campaign == campaign,
+        "Vasu scenario ROM campaign matches");
+    const auto scenario = oracle::gameplay::vasu_scenario(campaign);
+    const RoomObjectDecoder object_decoder{rom};
+    const auto catalog = object_decoder.decode(
+        static_cast<std::uint8_t>(scenario.room.area),
+        static_cast<std::uint8_t>(scenario.room.room));
+    check(
+        catalog.records.size() == 5,
+        "Vasu shop has five original interaction records");
+
+    ActorSlotDomain actors;
+    const auto report = RoomActorLoader::load(catalog, actors);
+    check(report.failures.empty(), "Vasu shop actors fit original slots");
+    check(
+        actors.active_count(ActorCategory::interaction) == 5,
+        "Vasu shop instantiates all room interactions");
+    const auto slots = actors.slots(ActorCategory::interaction);
+    check(
+        slots[2].identity.id == 0x89 &&
+            slots[2].identity.subid == 0 &&
+            slots[2].local_x == 0x50 &&
+            slots[2].local_y == 0x18,
+        "Vasu actor preserves ROM identity and ground anchor");
+
+    const InteractionSpriteDecoder sprite_decoder{rom};
+    const auto sprite = sprite_decoder.decode_vasu(0, 0);
+    check(
+        sprite.width > 16 && sprite.height > 16,
+        "Vasu OAM keeps its multi-sprite original size");
+    check(
+        std::any_of(
+            sprite.pixels.begin(),
+            sprite.pixels.end(),
+            [](const oracle::content::RgbaPixel pixel) {
+                return pixel.alpha != 0;
+            }),
+        "Vasu frame contains decoded opaque ROM pixels");
+
+    const RomTextDecoder text_decoder{rom};
+    const auto welcome = text_decoder.decode(0x3003);
+    check(
+        welcome.pages.size() == 3 && welcome.option_count == 3,
+        "Vasu welcome retains original stops and options");
+    check(
+        welcome.pages.front().find("Vasu") != std::string::npos,
+        "Vasu welcome text decodes from the ROM");
+
+    auto player = PlayerTraversal::from_packed_room_position(
+        scenario.room,
+        scenario.player_spawn_yx);
+    player.facing = PlayerFacing::north;
+    VasuInteractionRuntime runtime;
+    runtime.update(
+        pressed_frame(InputAction::a),
+        player,
+        actors,
+        text_decoder);
+    runtime.update(
+        pressed_frame(InputAction::a),
+        player,
+        actors,
+        text_decoder);
+    runtime.update(
+        pressed_frame(InputAction::a),
+        player,
+        actors,
+        text_decoder);
+    runtime.update(
+        pressed_frame(InputAction::down),
+        player,
+        actors,
+        text_decoder);
+    runtime.update(
+        pressed_frame(InputAction::a),
+        player,
+        actors,
+        text_decoder);
+    check(
+        runtime.model().message == 0x3015,
+        "Vasu List branch reaches the original no-rings message");
+
+    VasuInteractionRuntime replay;
+    const std::array<InputAction, 5> actions{
+        InputAction::a,
+        InputAction::a,
+        InputAction::a,
+        InputAction::down,
+        InputAction::a,
+    };
+    for (const auto action : actions) {
+        replay.update(
+            pressed_frame(action),
+            player,
+            actors,
+            text_decoder);
+    }
+    check(
+        replay.deterministic_state() ==
+            runtime.deterministic_state(),
+        "identical semantic input reproduces Vasu state");
+}
+
+void test_vasu_rom_scenarios() {
+    test_vasu_rom_scenario(
+        "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",
+        oracle::core::Campaign::ages);
+    test_vasu_rom_scenario(
+        "roms/Legend of Zelda, The - Oracle of Seasons (USA).gbc",
+        oracle::core::Campaign::seasons);
 }
 
 void test_item_primitives() {
@@ -603,6 +850,8 @@ void test_player_traversal() {
 }  // namespace
 
 int main() {
+    test_semantic_input_frames();
+    test_actor_slot_domain();
     test_item_primitives();
     test_campaign_policy();
     test_presentation_camera();
@@ -613,6 +862,7 @@ int main() {
     test_room_collision_shapes();
     test_spatial_room_seams();
     test_player_traversal();
+    test_vasu_rom_scenarios();
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
         return EXIT_FAILURE;
