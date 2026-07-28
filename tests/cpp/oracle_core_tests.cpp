@@ -581,6 +581,23 @@ void test_player_traversal() {
     check(
         PlayerTraversal::packed_room_position(packed) == 0x44,
         "packed warp position conversion round-trips");
+
+    const auto enters_from_bottom =
+        PlayerTraversal::from_transition_destination(
+            WorldRoomId{.area = 4, .room = 0x66},
+            0xff,
+            0x09,
+            0x03,
+            240.0,
+            176.0);
+    check_close(
+        enters_from_bottom.local_x,
+        120.0,
+        "FF enter-screen destination uses horizontal room center");
+    check_close(
+        enters_from_bottom.local_y,
+        168.0,
+        "parameter 9 enters from the bottom room edge");
 }
 
 }  // namespace

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "oracle/content/rom_source.h"
@@ -56,6 +57,24 @@ public:
         std::uint8_t room,
         std::uint8_t destination_variant = 0,
         bool include_spatial_seams = true) const;
+
+    [[nodiscard]] std::optional<std::uint8_t> warp_tile_property(
+        std::uint8_t collision_mode,
+        std::uint8_t metatile) const;
+
+    [[nodiscard]] std::optional<RoomExit> resolve_tile_warp(
+        std::uint8_t group,
+        std::uint8_t room,
+        std::uint8_t source_position,
+        std::uint8_t metatile,
+        std::uint8_t collision_mode,
+        std::uint8_t destination_variant = 0) const;
+
+    [[nodiscard]] std::optional<RoomExit> resolve_screen_edge_warp(
+        std::uint8_t group,
+        std::uint8_t room,
+        std::uint8_t edge_quadrant_mask,
+        std::uint8_t destination_variant = 0) const;
 
     [[nodiscard]] static std::vector<RoomExit> spatial_seams(
         std::uint8_t group,

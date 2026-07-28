@@ -99,6 +99,8 @@ The scaffold currently contains:
   transition metadata, and season-adjusted destinations;
 - collision-aware diagnostic player movement with wall sliding, anti-tunneling,
   continuous small-room seam crossing, and a following widescreen camera;
+- live ROM tile-warp and vertical screen-edge execution with destination-group
+  loading, transition-aware placement, and warp re-entry suppression;
 - all 256 small rooms in world groups 0–3, with full-resolution atlas export;
 - individual 15×11 large rooms from dungeon and side-scrolling groups 4–7;
 - an SDL3 GPU room viewer using authentic ROM-derived 3×3 world regions.
@@ -176,6 +178,13 @@ Decode and validate the complete conditional warp graph:
 build/oracle_room_slice path/to/oracle.gbc --catalog-topology
 ```
 
+Start at an exact original packed room position for transition diagnostics:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc \
+  --group 0 --room ba --spawn-yx 65
+```
+
 Set a deterministic starting animation tick, or preview the original
 persistent room-flag substitutions:
 
@@ -243,6 +252,9 @@ Room adjacency, warp records, and graph navigation are documented in
 The current player coordinate, collision-body, and seamless traversal model is
 documented in
 [`docs/architecture/player-traversal.md`](docs/architecture/player-traversal.md).
+Live warp-tile recognition, transition resolution, and destination streaming
+are documented in
+[`docs/architecture/live-room-transitions.md`](docs/architecture/live-room-transitions.md).
 
 Windows developers can instead open the maintained solution at
 [`projects/msvc/oracle-redux.sln`](projects/msvc/oracle-redux.sln).

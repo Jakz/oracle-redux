@@ -16,7 +16,7 @@ enum class PlayerFacing {
 
 struct PlayerBody {
     double half_width{4.0};
-    double half_height{4.0};
+    double half_height{3.0};
 };
 
 struct PlayerState {
@@ -74,6 +74,14 @@ public:
     [[nodiscard]] static PlayerState from_packed_room_position(
         core::WorldRoomId room,
         std::uint8_t position) noexcept;
+
+    [[nodiscard]] static PlayerState from_transition_destination(
+        core::WorldRoomId room,
+        std::uint8_t position,
+        std::uint8_t parameter,
+        std::uint8_t transition,
+        double room_width,
+        double room_height) noexcept;
 };
 
 }  // namespace oracle::gameplay

@@ -719,6 +719,79 @@ std::vector<RoomPlacement> decode_world_room(
     };
 }
 
+struct RuntimeWorldData {
+    std::vector<RoomPlacement> rooms;
+    std::vector<oracle::content::RoomCollisionMap> collisions;
+    std::optional<RegionPixels> authentic_region;
+    bool large_room_mode{};
+};
+
+RuntimeWorldData load_runtime_world(
+    const oracle::content::RoomLayoutDecoder& layout_decoder,
+    const oracle::content::RoomPixelDecoder& pixel_decoder,
+    const oracle::content::RoomMutationDecoder& mutation_decoder,
+    const oracle::content::RoomCollisionDecoder& collision_decoder,
+    const std::uint8_t world_group,
+    const std::uint8_t center_room,
+    const oracle::content::Season season,
+    const std::uint8_t room_flags,
+    const std::uint64_t animation_tick,
+    const bool force_diagnostic) {
+    const auto center_tileset =
+        pixel_decoder.describe_tileset(
+            world_group,
+            center_room,
+            season);
+    const bool large_room_mode =
+        layout_decoder.layout_kind(center_tileset.layout_group) ==
+        oracle::content::RoomLayoutKind::large;
+    auto rooms = large_room_mode
+        ? decode_world_room(
+              layout_decoder,
+              pixel_decoder,
+              mutation_decoder,
+              world_group,
+              center_room,
+              season,
+              room_flags)
+        : decode_world_rectangle(
+              layout_decoder,
+              pixel_decoder,
+              mutation_decoder,
+              world_group,
+              0,
+              15,
+              0,
+              15,
+              season,
+              room_flags);
+    std::vector<oracle::content::RoomCollisionMap> collisions;
+    collisions.reserve(rooms.size());
+    for (const auto& placement : rooms) {
+        const auto tileset = pixel_decoder.describe_tileset(
+            static_cast<std::uint8_t>(placement.layout.id.area),
+            static_cast<std::uint8_t>(placement.layout.id.room),
+            season);
+        collisions.push_back(
+            collision_decoder.decode(placement.layout, tileset));
+    }
+    std::optional<RegionPixels> authentic_region;
+    if (!force_diagnostic) {
+        authentic_region =
+            compose_region(
+                pixel_decoder,
+                rooms,
+                season,
+                animation_tick);
+    }
+    return RuntimeWorldData{
+        .rooms = std::move(rooms),
+        .collisions = std::move(collisions),
+        .authentic_region = std::move(authentic_region),
+        .large_room_mode = large_room_mode,
+    };
+}
+
 std::string campaign_name(const oracle::core::Campaign campaign) {
     return campaign == oracle::core::Campaign::ages ? "Ages" : "Seasons";
 }
@@ -992,19 +1065,25 @@ void save_region_bmp(
 
 int run_window(
     const oracle::content::RomSource& rom,
-    const std::vector<RoomPlacement>& rooms,
-    const std::vector<oracle::content::RoomCollisionMap>& collisions,
-    RegionPixels* authentic_region,
+    std::vector<RoomPlacement> rooms,
+    std::vector<oracle::content::RoomCollisionMap> collisions,
+    std::optional<RegionPixels> authentic_region,
+    const oracle::content::RoomLayoutDecoder& layout_decoder,
     const oracle::content::RoomPixelDecoder& pixel_decoder,
+    const oracle::content::RoomMutationDecoder& mutation_decoder,
+    const oracle::content::RoomCollisionDecoder& collision_decoder,
+    const oracle::content::RoomTopologyDecoder& topology_decoder,
     const oracle::content::Season season,
     const std::uint8_t center_room,
     const bool atlas_mode,
-    const bool large_room_mode,
+    bool large_room_mode,
     const bool player_mode,
     const bool force_diagnostic,
     const bool force_collision_overlay,
+    const std::uint8_t room_flags,
     const std::uint64_t starting_animation_tick,
-    std::optional<std::filesystem::path> screenshot_path) {
+    std::optional<std::filesystem::path> screenshot_path,
+    const std::optional<std::uint8_t> spawn_position) {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         throw std::runtime_error{
             std::string{"SDL initialization failed: "} + SDL_GetError()};
@@ -1045,7 +1124,7 @@ int run_window(
     SDL_SetRenderVSync(renderer, 1);
 
     SDL_Texture* region_texture = nullptr;
-    if (authentic_region != nullptr) {
+    if (authentic_region.has_value()) {
         region_texture = SDL_CreateTexture(
             renderer,
             SDL_PIXELFORMAT_RGBA32,
@@ -1095,7 +1174,14 @@ int run_window(
                 });
             return found == collisions.end() ? nullptr : &*found;
         };
-    oracle::gameplay::PlayerState initial_player{
+    oracle::gameplay::PlayerState initial_player = spawn_position.has_value()
+        ? oracle::gameplay::PlayerTraversal::from_packed_room_position(
+              oracle::core::WorldRoomId{
+                  .area = player_group,
+                  .room = center_room,
+              },
+              *spawn_position)
+        : oracle::gameplay::PlayerState{
         .room =
             oracle::core::WorldRoomId{
                 .area = player_group,
@@ -1110,6 +1196,7 @@ int run_window(
     };
     if (
         player_mode &&
+        !spawn_position.has_value() &&
         !oracle::gameplay::PlayerTraversal::place_near(
             initial_player,
             initial_player.local_x,
@@ -1154,17 +1241,121 @@ int run_window(
         .zoom = initial_zoom,
     };
     CameraState current = previous;
+    std::optional<oracle::content::RoomExit> last_warp;
+    std::optional<oracle::core::WorldRoomId> deactivated_warp_room;
+    std::uint8_t deactivated_warp_position{};
+    double warp_cooldown = 0.0;
+    std::uint64_t logic_tick = starting_animation_tick;
+    bool diagnostic =
+        force_diagnostic || !authentic_region.has_value();
+
+    const auto rebuild_region_texture = [&]() {
+        SDL_DestroyTexture(region_texture);
+        region_texture = nullptr;
+        if (!authentic_region.has_value()) {
+            return;
+        }
+        region_texture = SDL_CreateTexture(
+            renderer,
+            SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STATIC,
+            authentic_region->width,
+            authentic_region->height);
+        if (
+            region_texture == nullptr ||
+            !SDL_UpdateTexture(
+                region_texture,
+                nullptr,
+                authentic_region->pixels.data(),
+                authentic_region->width *
+                    static_cast<int>(
+                        sizeof(oracle::content::RgbaPixel)))) {
+            throw std::runtime_error{
+                std::string{"warped room texture upload failed: "} +
+                SDL_GetError()};
+        }
+        SDL_SetTextureScaleMode(region_texture, SDL_SCALEMODE_NEAREST);
+    };
+    const auto execute_warp =
+        [&](const oracle::content::RoomExit& warp) {
+            const auto preserve_diagnostic_view = diagnostic;
+            auto loaded = load_runtime_world(
+                layout_decoder,
+                pixel_decoder,
+                mutation_decoder,
+                collision_decoder,
+                static_cast<std::uint8_t>(warp.destination.area),
+                static_cast<std::uint8_t>(warp.destination.room),
+                season,
+                room_flags,
+                logic_tick,
+                force_diagnostic);
+            rooms = std::move(loaded.rooms);
+            collisions = std::move(loaded.collisions);
+            authentic_region = std::move(loaded.authentic_region);
+            large_room_mode = loaded.large_room_mode;
+            rebuild_region_texture();
+
+            const auto destination_placement = std::find_if(
+                rooms.begin(),
+                rooms.end(),
+                [&](const RoomPlacement& placement) {
+                    return placement.layout.id == warp.destination;
+                });
+            if (destination_placement == rooms.end()) {
+                throw std::runtime_error{
+                    "warped destination room was not loaded"};
+            }
+            current_player =
+                oracle::gameplay::PlayerTraversal::
+                    from_transition_destination(
+                        warp.destination,
+                        warp.destination_position,
+                        warp.destination_parameter,
+                        warp.destination_transition,
+                        destination_placement->layout.pixel_width(),
+                        destination_placement->layout.pixel_height());
+            if (
+                !oracle::gameplay::PlayerTraversal::can_occupy(
+                    current_player,
+                    collision_lookup)) {
+                static_cast<void>(
+                    oracle::gameplay::PlayerTraversal::place_near(
+                        current_player,
+                        current_player.local_x,
+                        current_player.local_y,
+                        collision_lookup));
+            }
+            previous_player = current_player;
+            initial_player = current_player;
+            current.x =
+                oracle::gameplay::PlayerTraversal::world_x(
+                    current_player);
+            current.y =
+                oracle::gameplay::PlayerTraversal::world_y(
+                    current_player);
+            previous = current;
+            last_warp = warp;
+            warp_cooldown = 0.35;
+            deactivated_warp_room = current_player.room;
+            deactivated_warp_position =
+                oracle::gameplay::PlayerTraversal::
+                    packed_room_position(current_player);
+            diagnostic =
+                preserve_diagnostic_view ||
+                force_diagnostic ||
+                !authentic_region.has_value();
+        };
 
     constexpr double logic_step = 1.0 / 60.0;
     double accumulator = 0.0;
-    std::uint64_t logic_tick = starting_animation_tick;
     auto last_counter = SDL_GetPerformanceCounter();
     const auto counter_frequency =
         static_cast<double>(SDL_GetPerformanceFrequency());
     bool running = true;
-    bool diagnostic =
-        force_diagnostic || authentic_region == nullptr;
     bool collision_overlay = force_collision_overlay;
+    const auto screenshot_ready_tick =
+        starting_animation_tick + 2;
 
     while (running) {
         SDL_Event event{};
@@ -1178,9 +1369,23 @@ int run_window(
             } else if (
                 event.type == SDL_EVENT_KEY_DOWN &&
                 event.key.key == SDLK_R) {
+                if (
+                    player_mode &&
+                    current_player.room.area !=
+                        initial_player.room.area) {
+                    // initial_player is updated after every warp, so this is
+                    // only defensive if a future reset target spans groups.
+                    current_player = initial_player;
+                }
                 previous = CameraState{
-                    .x = center_x,
-                    .y = center_y,
+                    .x = player_mode
+                        ? oracle::gameplay::PlayerTraversal::world_x(
+                              initial_player)
+                        : center_x,
+                    .y = player_mode
+                        ? oracle::gameplay::PlayerTraversal::world_y(
+                              initial_player)
+                        : center_y,
                     .zoom = initial_zoom,
                 };
                 current = previous;
@@ -1189,7 +1394,7 @@ int run_window(
             } else if (
                 event.type == SDL_EVENT_KEY_DOWN &&
                 event.key.key == SDLK_F1 &&
-                authentic_region != nullptr) {
+                authentic_region.has_value()) {
                 diagnostic = !diagnostic;
             } else if (
                 event.type == SDL_EVENT_KEY_DOWN &&
@@ -1226,7 +1431,7 @@ int run_window(
                 (keyboard[SDL_SCANCODE_W] ||
                  keyboard[SDL_SCANCODE_UP] ? 1.0 : 0.0);
             if (player_mode) {
-                static_cast<void>(
+                const auto traversal =
                     oracle::gameplay::PlayerTraversal::step(
                         current_player,
                         oracle::gameplay::MovementInput{
@@ -1234,7 +1439,113 @@ int run_window(
                             .vertical = vertical,
                         },
                         logic_step,
-                        collision_lookup));
+                        collision_lookup);
+                warp_cooldown =
+                    std::max(0.0, warp_cooldown - logic_step);
+
+                std::optional<oracle::content::RoomExit> warp;
+                if (traversal.crossed_room_seam) {
+                    std::uint8_t edge_mask = 0;
+                    const auto source_room = static_cast<std::uint8_t>(
+                        traversal.previous_room.room);
+                    const auto destination_room =
+                        static_cast<std::uint8_t>(
+                            current_player.room.room);
+                    const auto right_half =
+                        previous_player.local_x >=
+                        oracle::content::small_room_world_width * 0.5;
+                    if (
+                        destination_room ==
+                        static_cast<std::uint8_t>(
+                            source_room - 0x10)) {
+                        edge_mask = right_half ? 0x02 : 0x01;
+                    } else if (
+                        destination_room ==
+                        static_cast<std::uint8_t>(
+                            source_room + 0x10)) {
+                        edge_mask = right_half ? 0x08 : 0x04;
+                    }
+                    if (edge_mask != 0) {
+                        warp =
+                            topology_decoder.resolve_screen_edge_warp(
+                                static_cast<std::uint8_t>(
+                                    traversal.previous_room.area),
+                                source_room,
+                                edge_mask,
+                                static_cast<std::uint8_t>(season));
+                    }
+                }
+                const auto current_packed_position =
+                    oracle::gameplay::PlayerTraversal::
+                        packed_room_position(current_player);
+                if (
+                    deactivated_warp_room.has_value() &&
+                    (
+                        *deactivated_warp_room != current_player.room ||
+                        deactivated_warp_position !=
+                            current_packed_position)) {
+                    deactivated_warp_room.reset();
+                }
+                const bool standing_on_deactivated_warp =
+                    deactivated_warp_room.has_value() &&
+                    *deactivated_warp_room == current_player.room &&
+                    deactivated_warp_position ==
+                        current_packed_position;
+                if (
+                    !warp.has_value() &&
+                    warp_cooldown == 0.0 &&
+                    !standing_on_deactivated_warp) {
+                    const auto local_column = static_cast<std::size_t>(
+                        std::max(0.0, current_player.local_x) /
+                        oracle::content::metatile_world_size);
+                    const auto local_row = static_cast<std::size_t>(
+                        std::max(0.0, current_player.local_y) /
+                        oracle::content::metatile_world_size);
+                    const auto placement = std::find_if(
+                        rooms.begin(),
+                        rooms.end(),
+                        [&](const RoomPlacement& candidate) {
+                            return
+                                candidate.layout.id ==
+                                current_player.room;
+                        });
+                    const auto centered_x = std::abs(
+                        std::fmod(current_player.local_x, 16.0) - 8.0) <=
+                        3.0;
+                    const auto centered_y = std::abs(
+                        std::fmod(current_player.local_y, 16.0) - 8.0) <=
+                        3.0;
+                    if (
+                        placement != rooms.end() &&
+                        local_column < placement->layout.columns &&
+                        local_row < placement->layout.rows &&
+                        centered_x &&
+                        centered_y) {
+                        const auto metatile =
+                            placement->layout.metatiles[
+                                local_row * placement->layout.columns +
+                                local_column];
+                        const auto tileset =
+                            pixel_decoder.describe_tileset(
+                                static_cast<std::uint8_t>(
+                                    current_player.room.area),
+                                static_cast<std::uint8_t>(
+                                    current_player.room.room),
+                                season);
+                        warp = topology_decoder.resolve_tile_warp(
+                            static_cast<std::uint8_t>(
+                                current_player.room.area),
+                            static_cast<std::uint8_t>(
+                                current_player.room.room),
+                            current_packed_position,
+                            metatile,
+                            tileset.collision_mode,
+                            static_cast<std::uint8_t>(season));
+                    }
+                }
+                if (warp.has_value()) {
+                    execute_warp(*warp);
+                }
                 current.x =
                     oracle::gameplay::PlayerTraversal::world_x(
                         current_player);
@@ -1263,7 +1574,7 @@ int run_window(
         int output_width = 0;
         int output_height = 0;
         SDL_GetRenderOutputSize(renderer, &output_width, &output_height);
-        if (authentic_region != nullptr) {
+        if (authentic_region.has_value()) {
             const auto signature =
                 region_animation_signature(
                     pixel_decoder,
@@ -1383,7 +1694,7 @@ int run_window(
 
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(renderer, 8, 10, 18, 210);
-        const SDL_FRect panel{12.0f, 12.0f, 560.0f, 78.0f};
+        const SDL_FRect panel{12.0f, 12.0f, 620.0f, 98.0f};
         SDL_RenderFillRect(renderer, &panel);
         SDL_SetRenderDrawColor(renderer, 232, 238, 248, SDL_ALPHA_OPAQUE);
         const std::string line_one = player_mode
@@ -1397,10 +1708,40 @@ int run_window(
             collision_overlay
             ? "F2: hide collisions | red: solid | blue/cyan: special"
             : "F2: show ROM collision shapes";
+        std::ostringstream status_line;
+        if (player_mode) {
+            status_line
+                << "room " << std::hex << std::setw(2)
+                << std::setfill('0')
+                << static_cast<unsigned int>(current_player.room.area)
+                << ':' << std::setw(2)
+                << static_cast<unsigned int>(current_player.room.room)
+                << "  yx " << std::setw(2)
+                << static_cast<unsigned int>(
+                       oracle::gameplay::PlayerTraversal::
+                           packed_room_position(current_player));
+            if (last_warp.has_value()) {
+                status_line
+                    << "  last warp "
+                    << exit_kind_name(last_warp->kind)
+                    << " -> " << std::setw(2)
+                    << static_cast<unsigned int>(
+                           last_warp->destination.area)
+                    << ':' << std::setw(2)
+                    << static_cast<unsigned int>(
+                           last_warp->destination.room);
+            }
+        }
         SDL_RenderDebugText(renderer, 22.0f, 23.0f, line_one.c_str());
         SDL_RenderDebugText(renderer, 22.0f, 43.0f, line_two.c_str());
         SDL_RenderDebugText(renderer, 22.0f, 63.0f, line_three.c_str());
-        if (screenshot_path.has_value()) {
+        if (player_mode) {
+            const auto text = status_line.str();
+            SDL_RenderDebugText(renderer, 22.0f, 83.0f, text.c_str());
+        }
+        if (
+            screenshot_path.has_value() &&
+            logic_tick >= screenshot_ready_tick) {
             SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
             if (pixels == nullptr) {
                 throw std::runtime_error{
@@ -1442,6 +1783,7 @@ int main(int argc, char* argv[]) {
                    "[--collisions] "
                    "[--list-exits] [--follow-exit N] "
                    "[--catalog-topology] "
+                   "[--spawn-yx HEX] "
                    "[--tick N] [--room-flags HEX] "
                    "[--describe] [--screenshot PATH]\n";
             return EXIT_FAILURE;
@@ -1456,6 +1798,7 @@ int main(int argc, char* argv[]) {
         bool atlas_mode = false;
         bool catalog_topology = false;
         std::optional<std::size_t> follow_exit_index;
+        std::optional<std::uint8_t> spawn_position;
         auto season = oracle::content::Season::spring;
         std::uint64_t animation_tick = 0;
         std::uint8_t room_flags = 0;
@@ -1481,6 +1824,10 @@ int main(int argc, char* argv[]) {
                 index + 1 < argc) {
                 follow_exit_index = static_cast<std::size_t>(
                     parse_unsigned_integer(argv[++index]));
+            } else if (
+                argument == "--spawn-yx" &&
+                index + 1 < argc) {
+                spawn_position = parse_hex_byte(argv[++index]);
             } else if (argument == "--group" && index + 1 < argc) {
                 world_group = parse_hex_byte(argv[++index]);
             } else if (argument == "--room" && index + 1 < argc) {
@@ -1583,7 +1930,7 @@ int main(int argc, char* argv[]) {
             !atlas_mode &&
             !describe_only &&
             !region_output_path.has_value();
-        const auto rooms = large_room_mode
+        auto rooms = large_room_mode
             ? decode_world_room(
                   layout_decoder,
                   pixel_decoder,
@@ -1652,6 +1999,117 @@ int main(int argc, char* argv[]) {
             animation_tick,
             room_flags);
         print_room_exits(room_exits);
+        if (spawn_position.has_value()) {
+            const auto room = std::find_if(
+                rooms.begin(),
+                rooms.end(),
+                [center_room](const RoomPlacement& placement) {
+                    return placement.layout.id.room == center_room;
+                });
+            const auto collision = std::find_if(
+                collisions.begin(),
+                collisions.end(),
+                [center_room](
+                    const oracle::content::RoomCollisionMap& map) {
+                    return map.id.room == center_room;
+                });
+            const auto column =
+                static_cast<std::size_t>(*spawn_position & 0x0f);
+            const auto packed_row =
+                static_cast<std::size_t>(*spawn_position >> 4u);
+            const auto row = packed_row == 0 ? 0 : packed_row - 1;
+            if (
+                room != rooms.end() &&
+                collision != collisions.end() &&
+                column < room->layout.columns &&
+                row < room->layout.rows) {
+                const auto metatile =
+                    room->layout.metatiles[
+                        row * room->layout.columns + column];
+                const auto tileset = pixel_decoder.describe_tileset(
+                    world_group,
+                    center_room,
+                    season);
+                const auto warp_property =
+                    topology_decoder.warp_tile_property(
+                        tileset.collision_mode,
+                        metatile);
+                std::cout
+                    << "spawn_metatile=" << std::hex << std::setw(2)
+                    << std::setfill('0')
+                    << static_cast<unsigned int>(metatile) << '\n'
+                    << "spawn_collision=" << std::setw(2)
+                    << static_cast<unsigned int>(
+                           collision->at(column, row))
+                    << '\n'
+                    << "spawn_warp_property=";
+                if (warp_property.has_value()) {
+                    std::cout
+                        << std::setw(2)
+                        << static_cast<unsigned int>(*warp_property);
+                } else {
+                    std::cout << "none";
+                }
+                std::cout << std::dec << '\n';
+                std::cout << "room_warp_tiles=";
+                bool first = true;
+                for (std::size_t tile_row = 0;
+                     tile_row < room->layout.rows;
+                     ++tile_row) {
+                    for (std::size_t tile_column = 0;
+                         tile_column < room->layout.columns;
+                         ++tile_column) {
+                        const auto candidate =
+                            room->layout.metatiles[
+                                tile_row * room->layout.columns +
+                                tile_column];
+                        if (
+                            !topology_decoder.warp_tile_property(
+                                 tileset.collision_mode,
+                                 candidate)
+                                 .has_value()) {
+                            continue;
+                        }
+                        if (!first) {
+                            std::cout << ',';
+                        }
+                        first = false;
+                        std::cout
+                            << std::hex << std::setw(2)
+                            << std::setfill('0')
+                            << static_cast<unsigned int>(
+                                   ((tile_row + 1) << 4u) |
+                                   tile_column);
+                    }
+                }
+                if (first) {
+                    std::cout << "none";
+                }
+                std::cout << std::dec << '\n';
+                const auto resolved =
+                    topology_decoder.resolve_tile_warp(
+                        world_group,
+                        center_room,
+                        *spawn_position,
+                        metatile,
+                        tileset.collision_mode,
+                        destination_variant);
+                std::cout << "spawn_resolved_warp=";
+                if (resolved.has_value()) {
+                    std::cout
+                        << std::hex << std::setw(2)
+                        << std::setfill('0')
+                        << static_cast<unsigned int>(
+                               resolved->destination.area)
+                        << ':' << std::setw(2)
+                        << static_cast<unsigned int>(
+                               resolved->destination.room);
+                } else {
+                    std::cout << "none";
+                }
+                std::cout << std::dec << '\n';
+            }
+        }
         if (region_output_path.has_value()) {
             if (!authentic_region.has_value()) {
                 throw std::runtime_error{
@@ -1665,10 +2123,14 @@ int main(int argc, char* argv[]) {
         }
         return run_window(
             rom,
-            rooms,
-            collisions,
-            authentic_region ? &*authentic_region : nullptr,
+            std::move(rooms),
+            std::move(collisions),
+            std::move(authentic_region),
+            layout_decoder,
             pixel_decoder,
+            mutation_decoder,
+            collision_decoder,
+            topology_decoder,
             season,
             center_room,
             atlas_mode,
@@ -1676,8 +2138,10 @@ int main(int argc, char* argv[]) {
             player_mode,
             force_diagnostic,
             force_collision_overlay,
+            room_flags,
             animation_tick,
-            screenshot_path);
+            screenshot_path,
+            spawn_position);
     } catch (const std::exception& error) {
         std::cerr << "oracle_room_slice: " << error.what() << '\n';
         return EXIT_FAILURE;

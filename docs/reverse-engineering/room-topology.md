@@ -112,9 +112,9 @@ records; in particular, a group fallback can appear for many source rooms.
 
 ## Current boundary
 
-This slice catalogs possible connectivity. It does not yet test Link's body
-against the collision map, detect warp-class metatiles, apply room flags to
-transition availability, execute fades, update respawn state, or stream the
-destination into a live simulation. Those behaviors are now able to build on
-typed collision and topology data instead of reopening raw ROM parsing inside
-gameplay code.
+The interactive slice now consumes this graph for collision-aware seams,
+warp-class metatiles, vertical screen-edge overrides, destination placement,
+and live destination loading. It does not yet execute transition fades,
+update respawn state, infer Ages dungeon stair destinations, or evaluate
+script/cutscene conditions. Those behaviors can build on typed collision and
+topology data instead of reopening raw ROM parsing inside gameplay code.

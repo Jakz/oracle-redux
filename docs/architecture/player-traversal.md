@@ -31,9 +31,10 @@ The conversion and its inverse are tested independently.
 
 ## Collision body
 
-The current diagnostic body is an 8×8 pixel square centered on the player.
-Eight perimeter samples are tested against `RoomCollisionMap`, using Link's
-original collision profile:
+The current diagnostic body is an 8×6 pixel rectangle centered on the player.
+The shallower vertical footprint permits the original partially-solid door
+centering window. Eight perimeter samples are tested against
+`RoomCollisionMap`, using Link's original collision profile:
 
 - ordinary four-quadrant collision masks block matching samples;
 - special bridge shapes use their original two-pixel stripe masks;

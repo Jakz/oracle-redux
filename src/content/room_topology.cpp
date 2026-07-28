@@ -1,5 +1,6 @@
 #include "oracle/content/room_topology.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <sstream>
@@ -13,11 +14,15 @@ constexpr std::size_t ages_warp_destination_table = 0x12f5b;
 constexpr std::size_t ages_warp_source_table = 0x1359e;
 constexpr std::size_t seasons_warp_destination_table = 0x12d4e;
 constexpr std::size_t seasons_warp_source_table = 0x13457;
+constexpr std::size_t ages_warp_tile_table = 0x6238;
+constexpr std::size_t seasons_warp_tile_table = 0x60e8;
+constexpr std::uint8_t warp_tile_mode_count = 6;
 constexpr std::size_t maximum_warp_records = 4096;
 
 struct CampaignOffsets {
     std::size_t destination_table{};
     std::size_t source_table{};
+    std::size_t warp_tile_table{};
 };
 
 struct SourceRecord {
@@ -34,11 +39,13 @@ CampaignOffsets offsets_for(const core::Campaign campaign) {
         return CampaignOffsets{
             .destination_table = ages_warp_destination_table,
             .source_table = ages_warp_source_table,
+            .warp_tile_table = ages_warp_tile_table,
         };
     }
     return CampaignOffsets{
         .destination_table = seasons_warp_destination_table,
         .source_table = seasons_warp_source_table,
+        .warp_tile_table = seasons_warp_tile_table,
     };
 }
 
@@ -356,6 +363,98 @@ std::vector<RoomExit> RoomTopologyDecoder::exits(
                 destination_variant));
     }
     return result;
+}
+
+std::optional<std::uint8_t> RoomTopologyDecoder::warp_tile_property(
+    const std::uint8_t collision_mode,
+    const std::uint8_t metatile) const {
+    const auto mode =
+        static_cast<std::uint8_t>(collision_mode & 0x07);
+    if (mode >= warp_tile_mode_count || metatile == 0) {
+        return std::nullopt;
+    }
+    const auto offsets = offsets_for(rom_.metadata().campaign);
+    auto entry =
+        rom_.banked_file_offset(
+            1,
+            rom_.read_little_u16(
+                offsets.warp_tile_table +
+                static_cast<std::size_t>(mode) * 2));
+    for (std::size_t count = 0; count < 256; ++count) {
+        const auto candidate = rom_.read_byte(entry);
+        if (candidate == 0) {
+            return std::nullopt;
+        }
+        if (candidate == metatile) {
+            return rom_.read_byte(entry + 1);
+        }
+        entry += 2;
+    }
+    throw std::runtime_error{"warp tile table does not terminate"};
+}
+
+std::optional<RoomExit> RoomTopologyDecoder::resolve_tile_warp(
+    const std::uint8_t group,
+    const std::uint8_t room,
+    const std::uint8_t source_position,
+    const std::uint8_t metatile,
+    const std::uint8_t collision_mode,
+    const std::uint8_t destination_variant) const {
+    if (!warp_tile_property(collision_mode, metatile).has_value()) {
+        return std::nullopt;
+    }
+    const auto candidates =
+        exits(group, room, destination_variant, false);
+    const RoomExit* whole_room = nullptr;
+    const RoomExit* fallback = nullptr;
+    for (const auto& candidate : candidates) {
+        if (candidate.kind == RoomExitKind::screen_edge_warp) {
+            continue;
+        }
+        if (
+            candidate.has_source_position &&
+            !candidate.fallback &&
+            candidate.source_position == source_position) {
+            return candidate;
+        }
+        if (
+            !candidate.has_source_position &&
+            candidate.kind == RoomExitKind::tile_warp &&
+            whole_room == nullptr) {
+            whole_room = &candidate;
+        }
+        if (candidate.fallback && fallback == nullptr) {
+            fallback = &candidate;
+        }
+    }
+    if (whole_room != nullptr) {
+        return *whole_room;
+    }
+    if (fallback != nullptr) {
+        return *fallback;
+    }
+    return std::nullopt;
+}
+
+std::optional<RoomExit>
+RoomTopologyDecoder::resolve_screen_edge_warp(
+    const std::uint8_t group,
+    const std::uint8_t room,
+    const std::uint8_t edge_quadrant_mask,
+    const std::uint8_t destination_variant) const {
+    const auto candidates =
+        exits(group, room, destination_variant, false);
+    const auto found = std::find_if(
+        candidates.begin(),
+        candidates.end(),
+        [&](const RoomExit& candidate) {
+            return
+                candidate.kind == RoomExitKind::screen_edge_warp &&
+                (candidate.source_edge_mask & edge_quadrant_mask) != 0;
+        });
+    return found == candidates.end()
+        ? std::nullopt
+        : std::optional<RoomExit>{*found};
 }
 
 std::vector<RoomExit> RoomTopologyDecoder::spatial_seams(

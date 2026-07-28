@@ -377,4 +377,31 @@ PlayerState PlayerTraversal::from_packed_room_position(
     };
 }
 
+PlayerState PlayerTraversal::from_transition_destination(
+    const core::WorldRoomId room,
+    const std::uint8_t position,
+    const std::uint8_t parameter,
+    const std::uint8_t transition,
+    const double room_width,
+    const double room_height) noexcept {
+    auto player = from_packed_room_position(room, position);
+    constexpr std::uint8_t enter_screen_transition = 3;
+    if (transition != enter_screen_transition) {
+        return player;
+    }
+    if ((position & 0x0f) == 0x0f) {
+        player.local_x = room_width * 0.5;
+    }
+    if ((position >> 4u) == 0x0f) {
+        if (parameter == 0x09) {
+            player.local_y = room_height - 8.0;
+            player.facing = PlayerFacing::north;
+        } else {
+            player.local_y = 8.0;
+            player.facing = PlayerFacing::south;
+        }
+    }
+    return player;
+}
+
 }  // namespace oracle::gameplay
