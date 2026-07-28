@@ -19,10 +19,12 @@
 #include <unordered_set>
 #include <vector>
 
+#include "oracle/content/link_sprite.h"
 #include "oracle/content/rom_source.h"
 #include "oracle/content/room_collisions.h"
 #include "oracle/content/room_layout.h"
 #include "oracle/content/room_mutations.h"
+#include "oracle/content/room_objects.h"
 #include "oracle/content/room_pixels.h"
 #include "oracle/content/room_topology.h"
 #include "oracle/core/campaign.h"
@@ -380,11 +382,28 @@ void render_collision_overlay(
     }
 }
 
+oracle::content::LinkDirection link_direction(
+    const oracle::gameplay::PlayerFacing facing) {
+    using oracle::content::LinkDirection;
+    using oracle::gameplay::PlayerFacing;
+    switch (facing) {
+    case PlayerFacing::north:
+        return LinkDirection::north;
+    case PlayerFacing::east:
+        return LinkDirection::east;
+    case PlayerFacing::south:
+        return LinkDirection::south;
+    case PlayerFacing::west:
+        return LinkDirection::west;
+    }
+    return LinkDirection::south;
+}
+
 void render_player(
     SDL_Renderer* renderer,
+    SDL_Texture* texture,
     const double world_x,
     const double world_y,
-    const oracle::gameplay::PlayerFacing facing,
     const CameraState camera,
     const int output_width,
     const int output_height) {
@@ -392,55 +411,102 @@ void render_player(
         (world_x - camera.x) * camera.zoom + output_width * 0.5);
     const auto screen_y = static_cast<float>(
         (world_y - camera.y) * camera.zoom + output_height * 0.5);
-    const auto half_width =
-        static_cast<float>(4.0 * camera.zoom);
-    const auto half_height =
-        static_cast<float>(4.0 * camera.zoom);
+    const auto half_width = static_cast<float>(8.0 * camera.zoom);
+    const auto half_height = static_cast<float>(8.0 * camera.zoom);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, 4, 10, 14, 145);
     const SDL_FRect shadow{
-        .x = screen_x - half_width - 1.0f,
-        .y = screen_y + half_height * 0.35f,
-        .w = half_width * 2.0f + 2.0f,
-        .h = std::max(2.0f, half_height * 0.65f),
+        .x = screen_x - static_cast<float>(5.0 * camera.zoom),
+        .y = screen_y + static_cast<float>(4.0 * camera.zoom),
+        .w = static_cast<float>(10.0 * camera.zoom),
+        .h = std::max(2.0f, static_cast<float>(3.0 * camera.zoom)),
     };
     SDL_RenderFillRect(renderer, &shadow);
 
-    SDL_SetRenderDrawColor(renderer, 70, 238, 118, SDL_ALPHA_OPAQUE);
-    const SDL_FRect body{
+    const SDL_FRect sprite{
         .x = screen_x - half_width,
         .y = screen_y - half_height,
         .w = half_width * 2.0f,
         .h = half_height * 2.0f,
     };
-    SDL_RenderFillRect(renderer, &body);
-    SDL_SetRenderDrawColor(renderer, 245, 255, 220, SDL_ALPHA_OPAQUE);
-    SDL_RenderRect(renderer, &body);
+    SDL_RenderTexture(renderer, texture, nullptr, &sprite);
+}
 
-    auto direction_x = 0.0f;
-    auto direction_y = 0.0f;
-    switch (facing) {
-    case oracle::gameplay::PlayerFacing::north:
-        direction_y = -1.0f;
-        break;
-    case oracle::gameplay::PlayerFacing::east:
-        direction_x = 1.0f;
-        break;
-    case oracle::gameplay::PlayerFacing::south:
-        direction_y = 1.0f;
-        break;
-    case oracle::gameplay::PlayerFacing::west:
-        direction_x = -1.0f;
-        break;
+void render_object_anchors(
+    SDL_Renderer* renderer,
+    const oracle::content::RoomObjectCatalog& catalog,
+    const std::vector<RoomPlacement>& rooms,
+    const CameraState camera,
+    const int output_width,
+    const int output_height) {
+    const auto placement = std::find_if(
+        rooms.begin(),
+        rooms.end(),
+        [&](const RoomPlacement& candidate) {
+            return candidate.layout.id == catalog.room;
+        });
+    if (placement == rooms.end()) {
+        return;
     }
-    SDL_RenderLine(
-        renderer,
-        screen_x,
-        screen_y,
-        screen_x + direction_x *
-            static_cast<float>(7.0 * camera.zoom),
-        screen_y + direction_y *
-            static_cast<float>(7.0 * camera.zoom));
+    for (const auto& object : catalog.records) {
+        if (!object.positioned) {
+            continue;
+        }
+        Color color{};
+        switch (object.kind) {
+        case oracle::content::RoomObjectKind::interaction:
+            color = Color{45, 220, 255};
+            break;
+        case oracle::content::RoomObjectKind::enemy:
+            color = Color{255, 70, 75};
+            break;
+        case oracle::content::RoomObjectKind::part:
+            color = Color{255, 220, 55};
+            break;
+        case oracle::content::RoomObjectKind::item_drop:
+            color = Color{238, 95, 255};
+            break;
+        }
+        const auto world_x =
+            placement->world_x + object.original_x;
+        const auto world_y =
+            placement->world_y +
+            static_cast<double>(object.original_y) - 16.0;
+        const auto screen_x = static_cast<float>(
+            (world_x - camera.x) * camera.zoom +
+            output_width * 0.5);
+        const auto screen_y = static_cast<float>(
+            (world_y - camera.y) * camera.zoom +
+            output_height * 0.5);
+        const auto radius =
+            std::max(3.0f, static_cast<float>(3.0 * camera.zoom));
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(
+            renderer,
+            color.red,
+            color.green,
+            color.blue,
+            object.conditional ? 150 : 230);
+        const SDL_FRect marker{
+            .x = screen_x - radius,
+            .y = screen_y - radius,
+            .w = radius * 2.0f,
+            .h = radius * 2.0f,
+        };
+        SDL_RenderRect(renderer, &marker);
+        SDL_RenderLine(
+            renderer,
+            screen_x - radius,
+            screen_y,
+            screen_x + radius,
+            screen_y);
+        SDL_RenderLine(
+            renderer,
+            screen_x,
+            screen_y - radius,
+            screen_x,
+            screen_y + radius);
+    }
 }
 
 void copy_room_pixels(
@@ -922,6 +988,69 @@ void print_topology_catalog(
         << std::setfill('0') << signature << std::dec << '\n';
 }
 
+void print_object_catalog(
+    const oracle::content::RoomObjectDecoder& decoder,
+    const std::uint8_t room_flags) {
+    constexpr std::uint64_t signature_prime = 1099511628211ull;
+    auto signature = 14695981039346656037ull;
+    std::size_t populated_rooms = 0;
+    std::size_t records = 0;
+    std::size_t positioned = 0;
+    std::array<std::size_t, 4> kinds{};
+    for (std::uint8_t group = 0; group < 8; ++group) {
+        for (std::uint16_t room = 0; room < 256; ++room) {
+            oracle::content::RoomObjectCatalog catalog;
+            try {
+                catalog = decoder.decode(
+                    group,
+                    static_cast<std::uint8_t>(room),
+                    room_flags);
+            } catch (const std::exception& error) {
+                std::ostringstream message;
+                message
+                    << "object catalog failed at "
+                    << std::hex << std::setw(2)
+                    << std::setfill('0')
+                    << static_cast<unsigned int>(group)
+                    << ':' << std::setw(2) << room
+                    << ": " << error.what();
+                throw std::runtime_error{message.str()};
+            }
+            populated_rooms += catalog.records.empty() ? 0u : 1u;
+            records += catalog.records.size();
+            for (const auto& object : catalog.records) {
+                positioned += object.positioned ? 1u : 0u;
+                ++kinds[static_cast<std::size_t>(object.kind)];
+                signature ^= group;
+                signature *= signature_prime;
+                signature ^= room;
+                signature *= signature_prime;
+                signature ^= static_cast<std::uint8_t>(object.kind);
+                signature *= signature_prime;
+                signature ^= object.id;
+                signature *= signature_prime;
+                signature ^= object.subid;
+                signature *= signature_prime;
+                signature ^= object.original_y;
+                signature *= signature_prime;
+                signature ^= object.original_x;
+                signature *= signature_prime;
+            }
+        }
+    }
+    std::cout
+        << "object_catalog_rooms=2048\n"
+        << "object_catalog_populated_rooms=" << populated_rooms << '\n'
+        << "object_catalog_records=" << records << '\n'
+        << "object_catalog_positioned=" << positioned << '\n'
+        << "object_catalog_interactions=" << kinds[0] << '\n'
+        << "object_catalog_enemies=" << kinds[1] << '\n'
+        << "object_catalog_parts=" << kinds[2] << '\n'
+        << "object_catalog_item_drops=" << kinds[3] << '\n'
+        << "object_catalog_signature=" << std::hex << std::setw(16)
+        << std::setfill('0') << signature << std::dec << '\n';
+}
+
 void print_description(
     const oracle::content::RomSource& rom,
     const std::vector<RoomPlacement>& rooms,
@@ -1072,6 +1201,7 @@ int run_window(
     const oracle::content::RoomPixelDecoder& pixel_decoder,
     const oracle::content::RoomMutationDecoder& mutation_decoder,
     const oracle::content::RoomCollisionDecoder& collision_decoder,
+    const oracle::content::RoomObjectDecoder& object_decoder,
     const oracle::content::RoomTopologyDecoder& topology_decoder,
     const oracle::content::Season season,
     const std::uint8_t center_room,
@@ -1080,6 +1210,7 @@ int run_window(
     const bool player_mode,
     const bool force_diagnostic,
     const bool force_collision_overlay,
+    const bool force_object_overlay,
     const std::uint8_t room_flags,
     const std::uint64_t starting_animation_tick,
     std::optional<std::filesystem::path> screenshot_path,
@@ -1122,6 +1253,22 @@ int run_window(
             "SDL3 GPU renderer creation failed: " + message};
     }
     SDL_SetRenderVSync(renderer, 1);
+
+    const oracle::content::LinkSpriteDecoder link_sprite_decoder{rom};
+    SDL_Texture* link_texture = SDL_CreateTexture(
+        renderer,
+        SDL_PIXELFORMAT_RGBA32,
+        SDL_TEXTUREACCESS_STREAMING,
+        16,
+        16);
+    if (link_texture == nullptr) {
+        throw std::runtime_error{
+            std::string{"Link texture creation failed: "} +
+            SDL_GetError()};
+    }
+    SDL_SetTextureScaleMode(link_texture, SDL_SCALEMODE_NEAREST);
+    SDL_SetTextureBlendMode(link_texture, SDL_BLENDMODE_BLEND);
+    std::optional<std::uint8_t> uploaded_link_frame;
 
     SDL_Texture* region_texture = nullptr;
     if (authentic_region.has_value()) {
@@ -1248,6 +1395,11 @@ int run_window(
     std::uint64_t logic_tick = starting_animation_tick;
     bool diagnostic =
         force_diagnostic || !authentic_region.has_value();
+    bool player_moving = false;
+    auto current_objects = object_decoder.decode(
+        player_group,
+        center_room,
+        room_flags);
 
     const auto rebuild_region_texture = [&]() {
         SDL_DestroyTexture(region_texture);
@@ -1328,6 +1480,12 @@ int run_window(
             }
             previous_player = current_player;
             initial_player = current_player;
+            current_objects = object_decoder.decode(
+                static_cast<std::uint8_t>(
+                    current_player.room.area),
+                static_cast<std::uint8_t>(
+                    current_player.room.room),
+                room_flags);
             current.x =
                 oracle::gameplay::PlayerTraversal::world_x(
                     current_player);
@@ -1354,6 +1512,7 @@ int run_window(
         static_cast<double>(SDL_GetPerformanceFrequency());
     bool running = true;
     bool collision_overlay = force_collision_overlay;
+    bool object_overlay = force_object_overlay;
     const auto screenshot_ready_tick =
         starting_animation_tick + 2;
 
@@ -1391,6 +1550,12 @@ int run_window(
                 current = previous;
                 previous_player = initial_player;
                 current_player = initial_player;
+                current_objects = object_decoder.decode(
+                    static_cast<std::uint8_t>(
+                        current_player.room.area),
+                    static_cast<std::uint8_t>(
+                        current_player.room.room),
+                    room_flags);
             } else if (
                 event.type == SDL_EVENT_KEY_DOWN &&
                 event.key.key == SDLK_F1 &&
@@ -1400,6 +1565,10 @@ int run_window(
                 event.type == SDL_EVENT_KEY_DOWN &&
                 event.key.key == SDLK_F2) {
                 collision_overlay = !collision_overlay;
+            } else if (
+                event.type == SDL_EVENT_KEY_DOWN &&
+                event.key.key == SDLK_F3) {
+                object_overlay = !object_overlay;
             } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
                 current.zoom = std::clamp(
                     current.zoom * std::pow(1.15, event.wheel.y),
@@ -1440,6 +1609,15 @@ int run_window(
                         },
                         logic_step,
                         collision_lookup);
+                player_moving = traversal.moved;
+                if (traversal.crossed_room_seam) {
+                    current_objects = object_decoder.decode(
+                        static_cast<std::uint8_t>(
+                            current_player.room.area),
+                        static_cast<std::uint8_t>(
+                            current_player.room.room),
+                        room_flags);
+                }
                 warp_cooldown =
                     std::max(0.0, warp_cooldown - logic_step);
 
@@ -1673,9 +1851,39 @@ int run_window(
                 output_width,
                 output_height);
         }
+        if (object_overlay && player_mode) {
+            render_object_anchors(
+                renderer,
+                current_objects,
+                rooms,
+                render_camera,
+                output_width,
+                output_height);
+        }
         if (player_mode) {
+            const auto link_frame = link_sprite_decoder.decode(
+                link_direction(current_player.facing),
+                player_moving,
+                logic_tick);
+            if (
+                !uploaded_link_frame.has_value() ||
+                *uploaded_link_frame != link_frame.original_frame) {
+                if (!SDL_UpdateTexture(
+                        link_texture,
+                        nullptr,
+                        link_frame.pixels.data(),
+                        link_frame.width *
+                            static_cast<int>(
+                                sizeof(oracle::content::RgbaPixel)))) {
+                    throw std::runtime_error{
+                        std::string{"Link texture upload failed: "} +
+                        SDL_GetError()};
+                }
+                uploaded_link_frame = link_frame.original_frame;
+            }
             render_player(
                 renderer,
+                link_texture,
                 timing.interpolate(
                     oracle::gameplay::PlayerTraversal::world_x(
                         previous_player),
@@ -1686,7 +1894,6 @@ int run_window(
                         previous_player),
                     oracle::gameplay::PlayerTraversal::world_y(
                         current_player)),
-                current_player.facing,
                 render_camera,
                 output_width,
                 output_height);
@@ -1704,10 +1911,16 @@ int run_window(
             diagnostic
             ? "F1: authentic view | R: reset | mode: diagnostic"
             : "F1: diagnostic view | R: reset | mode: authentic";
-        const std::string line_three =
-            collision_overlay
-            ? "F2: hide collisions | red: solid | blue/cyan: special"
-            : "F2: show ROM collision shapes";
+        std::ostringstream diagnostic_line;
+        diagnostic_line
+            << (collision_overlay
+                    ? "F2: hide collisions"
+                    : "F2: show collisions")
+            << " | "
+            << (object_overlay
+                    ? "F3: hide object anchors"
+                    : "F3: show object anchors")
+            << " (" << current_objects.records.size() << ')';
         std::ostringstream status_line;
         if (player_mode) {
             status_line
@@ -1734,6 +1947,7 @@ int run_window(
         }
         SDL_RenderDebugText(renderer, 22.0f, 23.0f, line_one.c_str());
         SDL_RenderDebugText(renderer, 22.0f, 43.0f, line_two.c_str());
+        const auto line_three = diagnostic_line.str();
         SDL_RenderDebugText(renderer, 22.0f, 63.0f, line_three.c_str());
         if (player_mode) {
             const auto text = status_line.str();
@@ -1762,6 +1976,7 @@ int run_window(
         SDL_RenderPresent(renderer);
     }
 
+    SDL_DestroyTexture(link_texture);
     SDL_DestroyTexture(region_texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyGPUDevice(gpu_device);
@@ -1780,9 +1995,9 @@ int main(int argc, char* argv[]) {
                    "[--group HEX] [--room HEX] [--season NAME] "
                    "[--atlas] [--export-atlas PATH] "
                    "[--export-region PATH] [--diagnostic] "
-                   "[--collisions] "
+                   "[--collisions] [--objects] "
                    "[--list-exits] [--follow-exit N] "
-                   "[--catalog-topology] "
+                   "[--catalog-topology] [--catalog-objects] "
                    "[--spawn-yx HEX] "
                    "[--tick N] [--room-flags HEX] "
                    "[--describe] [--screenshot PATH]\n";
@@ -1795,8 +2010,10 @@ int main(int argc, char* argv[]) {
         bool describe_only = false;
         bool force_diagnostic = false;
         bool force_collision_overlay = false;
+        bool force_object_overlay = false;
         bool atlas_mode = false;
         bool catalog_topology = false;
+        bool catalog_objects = false;
         std::optional<std::size_t> follow_exit_index;
         std::optional<std::uint8_t> spawn_position;
         auto season = oracle::content::Season::spring;
@@ -1814,10 +2031,15 @@ int main(int argc, char* argv[]) {
                 force_diagnostic = true;
             } else if (argument == "--collisions") {
                 force_collision_overlay = true;
+            } else if (argument == "--objects") {
+                force_object_overlay = true;
             } else if (argument == "--list-exits") {
                 describe_only = true;
             } else if (argument == "--catalog-topology") {
                 catalog_topology = true;
+                describe_only = true;
+            } else if (argument == "--catalog-objects") {
+                catalog_objects = true;
                 describe_only = true;
             } else if (
                 argument == "--follow-exit" &&
@@ -1872,6 +2094,7 @@ int main(int argc, char* argv[]) {
         const oracle::content::RoomPixelDecoder pixel_decoder{rom};
         const oracle::content::RoomCollisionDecoder collision_decoder{rom};
         const oracle::content::RoomMutationDecoder mutation_decoder{rom};
+        const oracle::content::RoomObjectDecoder object_decoder{rom};
         const oracle::content::RoomTopologyDecoder topology_decoder{rom};
         const auto destination_variant =
             static_cast<std::uint8_t>(season);
@@ -1879,6 +2102,9 @@ int main(int argc, char* argv[]) {
             print_topology_catalog(
                 topology_decoder,
                 destination_variant);
+        }
+        if (catalog_objects) {
+            print_object_catalog(object_decoder, room_flags);
         }
         if (follow_exit_index.has_value()) {
             const auto source_exits =
@@ -1999,6 +2225,23 @@ int main(int argc, char* argv[]) {
             animation_tick,
             room_flags);
         print_room_exits(room_exits);
+        const auto room_objects =
+            object_decoder.decode(
+                world_group,
+                center_room,
+                room_flags);
+        const auto positioned_object_count =
+            std::count_if(
+                room_objects.records.begin(),
+                room_objects.records.end(),
+                [](const oracle::content::RoomObjectRecord& object) {
+                    return object.positioned;
+                });
+        std::cout
+            << "room_object_count="
+            << room_objects.records.size() << '\n'
+            << "positioned_object_count="
+            << positioned_object_count << '\n';
         if (spawn_position.has_value()) {
             const auto room = std::find_if(
                 rooms.begin(),
@@ -2130,6 +2373,7 @@ int main(int argc, char* argv[]) {
             pixel_decoder,
             mutation_decoder,
             collision_decoder,
+            object_decoder,
             topology_decoder,
             season,
             center_room,
@@ -2138,6 +2382,7 @@ int main(int argc, char* argv[]) {
             player_mode,
             force_diagnostic,
             force_collision_overlay,
+            force_object_overlay,
             room_flags,
             animation_tick,
             screenshot_path,

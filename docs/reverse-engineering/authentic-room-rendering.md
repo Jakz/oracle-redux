@@ -93,7 +93,7 @@ Not yet applied:
 - common dynamic substitutions such as chests, shutters, toggle blocks, and
   water-state changes;
 - room-specific pre- and post-graphics event overrides;
-- sprites, objects, collision behavior, and game state;
+- object-specific sprites and behavior, hazards, and complete game state;
 - tileset overrides tied to save flags, companions, or dungeon water level.
 
 The animation decoder treats the first sequence byte as the initial countdown,

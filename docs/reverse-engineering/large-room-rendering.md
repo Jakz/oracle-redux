@@ -102,8 +102,8 @@ The rendered result includes the immutable room layout, tileset mapping,
 graphics, palettes, animation frames, and standard persistent substitutions.
 It does not yet include:
 
-- chests and other objects represented by the object system;
-- enemies, NPCs, Link, particles, or interface sprites;
+- chests and other object-specific visuals represented by the object system;
+- enemies, NPCs, particles, or interface sprites;
 - common dynamic substitutions such as shutters and toggle blocks;
 - room-specific pre- and post-expansion hooks;
 - connectivity inferred from doors, stairs, warps, or dungeon metadata.

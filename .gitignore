@@ -6,6 +6,7 @@ analysis/generated/
 
 # External semantic reference, cloned locally when needed.
 reference/oracles-disasm/
+reference/projectz/
 reference/wla-dx/
 reference/make/
 reference/gnulib/

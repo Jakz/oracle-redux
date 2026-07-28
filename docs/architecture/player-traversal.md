@@ -1,8 +1,9 @@
 # Player traversal foundation
 
 The standalone room slice now has a renderer-independent traversal controller.
-Its first visual representation is deliberately a diagnostic marker rather
-than a provisional recreation of Link's sprites.
+Its first visual representation was deliberately a diagnostic marker. The
+viewer now composes Link's original 16x16 visual independently from this
+collision state.
 
 ## Coordinate model
 
@@ -70,8 +71,9 @@ Current controls:
 - the mouse wheel adjusts zoom without changing simulation coordinates;
 - `R` restores the initial room and position;
 - `F1` toggles authentic and metatile rendering;
-- `F2` toggles the collision overlay.
+- `F2` toggles the collision overlay;
+- `F3` toggles unresolved room-object spawn anchors.
 
-The player marker and its facing line are engine diagnostics. Authentic Link
-graphics, animation state, elevation, hazards, objects, and attacks remain
-separate future slices.
+Standing and ordinary walking now select original Link graphics frames by
+facing direction. Full animation state, elevation, hazards, object
+interaction, and attacks remain separate future slices.

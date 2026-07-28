@@ -30,7 +30,9 @@ target_compile_features(oracle_core PUBLIC cxx_std_20)
 target_link_libraries(oracle_core PUBLIC oracle_experience)
 
 add_library(oracle_content
+    src/content/link_sprite.cpp
     src/content/rom_source.cpp
+    src/content/room_objects.cpp
     src/content/room_collisions.cpp
     src/content/room_layout.cpp
     src/content/room_mutations.cpp

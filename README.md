@@ -59,6 +59,22 @@ python tools/trace_contract.py specs/traces/plans/*.json
 External checkouts and generated reports are ignored. They are research inputs,
 not distributable project source.
 
+## Research references
+
+- [`Stewmath/oracles-disasm`](https://github.com/Stewmath/oracles-disasm)
+  supplies the documented US-ROM symbols and source-level behavioral map.
+- [`ladxhd/projectz`](https://github.com/ladxhd/projectz) is an architectural
+  reference for separating a continuous HD tile world, active objects,
+  depth-sorted sprites, camera scale, and effects. It is not a source-code
+  dependency and no ProjectZ implementation or assets are redistributed.
+
+Optional local checkouts live under ignored `reference/` directories:
+
+```sh
+git clone --depth 1 \
+  https://github.com/ladxhd/projectz.git reference/projectz
+```
+
 ## Build the C++ runtime
 
 Headless libraries and tests have no SDL dependency. The optional standalone
@@ -99,6 +115,10 @@ The scaffold currently contains:
   transition metadata, and season-adjusted destinations;
 - collision-aware diagnostic player movement with wall sliding, anti-tunneling,
   continuous small-room seam crossing, and a following widescreen camera;
+- authentic 16x16 Link visuals decoded at runtime from the original sprite,
+  OAM-composition, animation-frame, and sprite-palette tables;
+- typed room-object bytecode catalogs for interactions, enemies, parts, and
+  item drops, with original spawn coordinates and diagnostic anchors;
 - live ROM tile-warp and vertical screen-edge execution with destination-group
   loading, transition-aware placement, and warp re-entry suppression;
 - all 256 small rooms in world groups 0–3, with full-resolution atlas export;
@@ -124,12 +144,14 @@ build/oracle_room_slice "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc"
 
 Controls:
 
-- in normal launch mode, `WASD` or arrow keys move the diagnostic player;
+- in normal launch mode, `WASD` or arrow keys move Link;
 - in `--atlas` mode, `WASD` or arrow keys pan the camera;
 - the mouse wheel zooms between overview and close-up scales;
 - `R` resets the camera;
 - `F1` switches between authentic pixels and the metatile diagnostic view;
 - `F2` overlays the decoded ROM collision shapes;
+- `F3` toggles anchors for ROM room objects whose actual actors are not yet
+  simulated and rendered;
 - `Escape` exits.
 
 Choose another room by its hexadecimal overworld coordinate:
@@ -176,6 +198,12 @@ Decode and validate the complete conditional warp graph:
 
 ```sh
 build/oracle_room_slice path/to/oracle.gbc --catalog-topology
+```
+
+Catalog all room-object streams for the selected cartridge:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc --catalog-objects
 ```
 
 Start at an exact original packed room position for transition diagnostics:
@@ -255,6 +283,10 @@ documented in
 Live warp-tile recognition, transition resolution, and destination streaming
 are documented in
 [`docs/architecture/live-room-transitions.md`](docs/architecture/live-room-transitions.md).
+The original Link sprite pipeline is documented in
+[`docs/reverse-engineering/link-sprite-rendering.md`](docs/reverse-engineering/link-sprite-rendering.md),
+and the dynamic room-object boundary in
+[`docs/reverse-engineering/room-objects.md`](docs/reverse-engineering/room-objects.md).
 
 Windows developers can instead open the maintained solution at
 [`projects/msvc/oracle-redux.sln`](projects/msvc/oracle-redux.sln).

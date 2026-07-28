@@ -1,0 +1,41 @@
+#pragma once
+
+#include <cstdint>
+#include <vector>
+
+#include "oracle/content/rom_source.h"
+#include "oracle/content/room_pixels.h"
+
+namespace oracle::content {
+
+enum class LinkDirection : std::uint8_t {
+    north = 0,
+    east = 1,
+    south = 2,
+    west = 3,
+};
+
+struct LinkSpriteFrame {
+    std::uint8_t original_frame{};
+    std::int32_t width{16};
+    std::int32_t height{16};
+    std::vector<RgbaPixel> pixels;
+};
+
+// Decodes Link's original 8x16 OAM composition, graphics, and palette from a
+// player-supplied cartridge image. The returned visual remains independent
+// from Link's smaller collision body.
+class LinkSpriteDecoder {
+public:
+    explicit LinkSpriteDecoder(const RomSource& rom);
+
+    [[nodiscard]] LinkSpriteFrame decode(
+        LinkDirection direction,
+        bool moving,
+        std::uint64_t animation_tick) const;
+
+private:
+    const RomSource& rom_;
+};
+
+}  // namespace oracle::content
