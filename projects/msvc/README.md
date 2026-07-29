@@ -20,18 +20,26 @@ configuration output directory as the executable.
 ## Projects
 
 - `OracleRoomSlice` builds the interactive BYO-ROM renderer. It is the default
-  project to run and already has the local Ages US path configured as its
-  debugger argument with `--octorok-scenario`. It renders authentic cartridge
-  pixels and Octorok OAM, runs the shared native enemy state machine, applies
-  contact damage, and exposes `X` as the provisional sword strike. The Vasu
-  scenario remains available with `--vasu-scenario`; use `WASD`/arrows to
-  move, `Z` to talk, and `F1` for the metatile diagnostic view.
+  project to run and already has the local Ages US path configured as its only
+  debugger argument. A ROM-only launch always opens the newest playable
+  fidelity slice, currently Octorok combat. This remains true when Visual
+  Studio has cached an old `.vcxproj.user` launch entry. It renders authentic
+  cartridge pixels and Octorok OAM, runs the shared native enemy state machine,
+  applies contact damage, and exposes `X` as the provisional sword strike.
+  The Vasu scenario remains available with `--vasu-scenario`; use
+  `WASD`/arrows to move, `Z` to talk, and `F1` for the metatile diagnostic
+  view. Use `--explore`, or explicit `--group` and `--room` arguments, to start
+  in the original free-roaming room view instead.
 - `OracleRuntimeTests` builds all headless runtime sources and the native test
   executable. Set it as the startup project and press `Ctrl+F5` to run it.
 - `SDL3` is the unmodified project from the ignored SDL checkout.
 
 To test Seasons, open `OracleRoomSlice` properties and replace the command
 argument under **Debugging** with the path to the Seasons US ROM.
+
+Visual Studio stores the chosen startup project in its local `.vs` state, not
+in the tracked solution. Keep `OracleRoomSlice` selected when testing gameplay;
+the startup project does not need to change as new slices are added.
 
 ## Command-line build
 

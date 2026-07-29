@@ -2532,7 +2532,8 @@ int main(int argc, char* argv[]) {
                    "[--collisions] [--objects] "
                    "[--list-exits] [--follow-exit N] "
                    "[--catalog-topology] [--catalog-objects] "
-                   "[--vasu-scenario] [--octorok-scenario] "
+                   "[--explore] [--vasu-scenario] "
+                   "[--octorok-scenario] "
                    "[--spawn-yx HEX] "
                    "[--tick N] [--room-flags HEX] "
                    "[--describe] [--screenshot PATH]\n";
@@ -2551,6 +2552,7 @@ int main(int argc, char* argv[]) {
         bool catalog_objects = false;
         bool vasu_scenario_mode = false;
         bool octorok_scenario_mode = false;
+        bool manual_world_selection = false;
         std::optional<std::size_t> follow_exit_index;
         std::optional<std::uint8_t> spawn_position;
         auto season = oracle::content::Season::spring;
@@ -2562,8 +2564,12 @@ int main(int argc, char* argv[]) {
             const std::string_view argument{argv[index]};
             if (argument == "--describe") {
                 describe_only = true;
+                manual_world_selection = true;
             } else if (argument == "--atlas") {
                 atlas_mode = true;
+                manual_world_selection = true;
+            } else if (argument == "--explore") {
+                manual_world_selection = true;
             } else if (argument == "--diagnostic") {
                 force_diagnostic = true;
             } else if (argument == "--collisions") {
@@ -2572,12 +2578,15 @@ int main(int argc, char* argv[]) {
                 force_object_overlay = true;
             } else if (argument == "--list-exits") {
                 describe_only = true;
+                manual_world_selection = true;
             } else if (argument == "--catalog-topology") {
                 catalog_topology = true;
                 describe_only = true;
+                manual_world_selection = true;
             } else if (argument == "--catalog-objects") {
                 catalog_objects = true;
                 describe_only = true;
+                manual_world_selection = true;
             } else if (argument == "--vasu-scenario") {
                 vasu_scenario_mode = true;
             } else if (argument == "--octorok-scenario") {
@@ -2585,17 +2594,22 @@ int main(int argc, char* argv[]) {
             } else if (
                 argument == "--follow-exit" &&
                 index + 1 < argc) {
+                manual_world_selection = true;
                 follow_exit_index = static_cast<std::size_t>(
                     parse_unsigned_integer(argv[++index]));
             } else if (
                 argument == "--spawn-yx" &&
                 index + 1 < argc) {
+                manual_world_selection = true;
                 spawn_position = parse_hex_byte(argv[++index]);
             } else if (argument == "--group" && index + 1 < argc) {
+                manual_world_selection = true;
                 world_group = parse_hex_byte(argv[++index]);
             } else if (argument == "--room" && index + 1 < argc) {
+                manual_world_selection = true;
                 center_room = parse_hex_byte(argv[++index]);
             } else if (argument == "--season" && index + 1 < argc) {
+                manual_world_selection = true;
                 season = parse_season(argv[++index]);
             } else if (argument == "--tick" && index + 1 < argc) {
                 animation_tick = parse_unsigned_integer(argv[++index]);
@@ -2606,12 +2620,14 @@ int main(int argc, char* argv[]) {
             } else if (
                 argument == "--export-atlas" &&
                 index + 1 < argc) {
+                manual_world_selection = true;
                 atlas_mode = true;
                 region_output_path =
                     std::filesystem::path{argv[++index]};
             } else if (
                 argument == "--export-region" &&
                 index + 1 < argc) {
+                manual_world_selection = true;
                 region_output_path =
                     std::filesystem::path{argv[++index]};
             } else if (argument == "--screenshot" && index + 1 < argc) {
@@ -2620,6 +2636,12 @@ int main(int argc, char* argv[]) {
                 throw std::invalid_argument{
                     "unknown or incomplete command-line argument"};
             }
+        }
+        if (
+            !manual_world_selection &&
+            !vasu_scenario_mode &&
+            !octorok_scenario_mode) {
+            octorok_scenario_mode = true;
         }
         if (world_group >= 8) {
             throw std::invalid_argument{

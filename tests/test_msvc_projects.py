@@ -31,6 +31,7 @@ class MsvcProjectTests(unittest.TestCase):
         )
         self.assertIn("LocalDebuggerCommandArguments", project)
         self.assertIn("Oracle of Ages (USA).gbc", project)
+        self.assertNotIn("--octorok-scenario", project)
 
 
 if __name__ == "__main__":
