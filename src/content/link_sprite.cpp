@@ -20,7 +20,6 @@ constexpr std::uint8_t seasons_palette_data_bank = 0x16;
 constexpr std::uint8_t ages_oam_data_bank = 0x13;
 constexpr std::uint8_t seasons_oam_data_bank = 0x12;
 constexpr std::uint8_t common_link_palette_header = 0x0f;
-constexpr std::uint8_t standing_frame_base = 0x1c;
 constexpr std::uint8_t walking_frame_a_base = 0x54;
 constexpr std::uint8_t walking_frame_b_base = 0x80;
 constexpr std::uint64_t walking_frame_ticks = 6;
@@ -148,11 +147,10 @@ LinkSpriteFrame LinkSpriteDecoder::decode(
 
     const auto walking_phase =
         (animation_tick / walking_frame_ticks) & 1u;
-    const auto frame_base = moving
-        ? walking_phase == 0
-            ? walking_frame_a_base
-            : walking_frame_b_base
-        : standing_frame_base;
+    const auto frame_base =
+        moving && walking_phase != 0
+        ? walking_frame_b_base
+        : walking_frame_a_base;
     const auto frame_index =
         static_cast<std::uint8_t>(frame_base + direction_index);
     const auto frame_record =

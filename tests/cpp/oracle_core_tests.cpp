@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "oracle/content/interaction_sprite.h"
+#include "oracle/content/link_sprite.h"
 #include "oracle/content/enemy_data.h"
 #include "oracle/content/enemy_sprite.h"
 #include "oracle/content/rom_source.h"
@@ -394,6 +395,43 @@ std::vector<std::uint8_t> test_vasu_rom_scenario(
             expected_opcodes.end()},
         "Vasu List scenario executes the expected retail opcode path");
     return opcodes;
+}
+
+void test_link_sprite_facing(
+    const std::filesystem::path& path,
+    const oracle::core::Campaign campaign) {
+    if (!std::filesystem::exists(path)) {
+        return;
+    }
+    using oracle::content::LinkDirection;
+    using oracle::content::LinkSpriteDecoder;
+    using oracle::content::RomSource;
+
+    const auto rom = RomSource::load(path);
+    check(
+        rom.metadata().campaign == campaign,
+        "Link sprite test ROM campaign matches");
+    const LinkSpriteDecoder decoder{rom};
+    constexpr std::array directions{
+        LinkDirection::north,
+        LinkDirection::east,
+        LinkDirection::south,
+        LinkDirection::west,
+    };
+    for (std::size_t index = 0; index < directions.size(); ++index) {
+        const auto idle = decoder.decode(directions[index], false, 0);
+        const auto walk_a = decoder.decode(directions[index], true, 0);
+        const auto walk_b = decoder.decode(directions[index], true, 6);
+        check(
+            idle.original_frame == 0x54 + index,
+            "idle Link retains the directional walk pose");
+        check(
+            walk_a.original_frame == idle.original_frame,
+            "first walking phase matches the directional idle pose");
+        check(
+            walk_b.original_frame == 0x80 + index,
+            "second walking phase preserves Link facing");
+    }
 }
 
 void test_vasu_rom_scenarios() {
@@ -1352,6 +1390,12 @@ int main() {
     test_room_collision_shapes();
     test_spatial_room_seams();
     test_player_traversal();
+    test_link_sprite_facing(
+        "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",
+        oracle::core::Campaign::ages);
+    test_link_sprite_facing(
+        "roms/Legend of Zelda, The - Oracle of Seasons (USA).gbc",
+        oracle::core::Campaign::seasons);
     test_vasu_rom_scenarios();
     test_octorok_rom_scenarios();
     if (failures != 0) {

@@ -33,9 +33,13 @@ vertical flips, and palette selection are applied before the two entries are
 composed into a transparent 16x16 RGBA frame.
 
 Palette header `0x0f` loads `standardSpritePaletteData`; color index zero is
-transparent for sprite composition. Standing uses frames `0x1c` through
-`0x1f`. Ordinary walking alternates the direction-adjusted `0x54` and `0x80`
-frame families on the original six-tick cadence.
+transparent for sprite composition. Ordinary walking alternates the
+direction-adjusted `0x54` and `0x80` frame families on the original six-tick
+cadence. When directional movement stops, the runtime holds the current
+direction's `0x54` pose. This is important because the original graphics loader
+only adds `w1Link.direction` to frame indices at or above `0x54`; the lower
+`0x1c` frame emitted by `LINK_ANIM_MODE_STAND` is not the base of four ordinary
+directional idle frames.
 
 This is intentionally a first animation subset. The original tables contain
 the remaining lift, swim, jump, item, attack, transformation, and cutscene
