@@ -42,9 +42,13 @@ decompression, authentic Vasu/snakes graphics and OAM, ground-anchor ordering,
 a minimal dialogue model, deterministic headless replay, and a
 `--vasu-scenario` bootstrap.
 
-The typed Vasu behavior currently covers the documented post-ring-box,
-no-rings branch. The general Native Script Runtime and validated Original State
-Keys remain required before this immediate slice is complete. See
+The documented post-ring-box, no-rings branch now runs from the original
+relocated Vasu bytecode in both cartridges. The bounded Native Script Runtime,
+validated Original State Keys, campaign-specific host registry, option labels,
+and source-coordinate execution traces are implemented. Headless replay proves
+that Ages and Seasons execute the same normalized instruction path. NPC
+solid-body collision is the remaining acceptance item before this immediate
+slice is complete. See
 [`../reverse-engineering/vasu-interaction-slice.md`](../reverse-engineering/vasu-interaction-slice.md).
 
 ### Scope
@@ -88,6 +92,13 @@ Keys remain required before this immediate slice is complete. See
 This is intentionally a runtime slice, not an engine-framework rewrite. The
 current viewer remains useful until gameplay interactions can validate correct
 sprite composition, anchors, ordering, and presentation snapshots.
+
+### Next implementation boundary
+
+Add actor collision bodies derived from the decoded interaction radii and
+integrate them with player wall sliding without changing room-tile collision.
+Exercise this in both Vasu rooms and add headless contact tests. Once that
+closes the immediate slice, begin the representative combat and item loop.
 
 ## Following slices
 

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
@@ -31,6 +32,8 @@
 #include "oracle/presentation/frame_timing.h"
 #include "oracle/presentation/render_plan.h"
 #include "oracle/presentation/world_scene.h"
+#include "oracle/script/campaign_script.h"
+#include "oracle/script/original_state.h"
 
 namespace {
 
@@ -154,11 +157,11 @@ void test_actor_slot_domain() {
         "slot generations reject stale actor handles");
 }
 
-void test_vasu_rom_scenario(
+std::vector<std::uint8_t> test_vasu_rom_scenario(
     const std::filesystem::path& path,
     const oracle::core::Campaign campaign) {
     if (!std::filesystem::exists(path)) {
-        return;
+        return {};
     }
     using oracle::content::InteractionSpriteDecoder;
     using oracle::content::RomSource;
@@ -171,6 +174,9 @@ void test_vasu_rom_scenario(
     using oracle::gameplay::RoomActorLoader;
     using oracle::gameplay::VasuInteractionRuntime;
     using oracle::input::InputAction;
+    using oracle::script::CampaignScriptProfile;
+    using oracle::script::OriginalActorField;
+    using oracle::script::OriginalStateKey;
 
     const auto rom = RomSource::load(path);
     check(
@@ -221,42 +227,60 @@ void test_vasu_rom_scenario(
     check(
         welcome.pages.front().find("Vasu") != std::string::npos,
         "Vasu welcome text decodes from the ROM");
+    check(
+        welcome.option_labels ==
+            std::vector<std::string>{"Appraise", "List", "Quit"},
+        "Vasu menu labels decode from original text commands");
 
     auto player = PlayerTraversal::from_packed_room_position(
         scenario.room,
         scenario.player_spawn_yx);
     player.facing = PlayerFacing::north;
-    VasuInteractionRuntime runtime;
+    VasuInteractionRuntime runtime{rom};
     runtime.update(
         pressed_frame(InputAction::a),
         player,
-        actors,
-        text_decoder);
+        actors);
     runtime.update(
         pressed_frame(InputAction::a),
         player,
-        actors,
-        text_decoder);
+        actors);
     runtime.update(
         pressed_frame(InputAction::a),
         player,
-        actors,
-        text_decoder);
+        actors);
     runtime.update(
         pressed_frame(InputAction::down),
         player,
-        actors,
-        text_decoder);
+        actors);
     runtime.update(
         pressed_frame(InputAction::a),
         player,
-        actors,
-        text_decoder);
+        actors);
+    runtime.update({}, player, actors);
     check(
         runtime.model().message == 0x3015,
         "Vasu List branch reaches the original no-rings message");
+    const auto* instance = runtime.script_instance();
+    check(instance != nullptr, "Vasu owns a campaign-script instance");
+    if (instance != nullptr) {
+        const auto entry = CampaignScriptProfile::vasu_entry(campaign);
+        check(
+            !runtime.script_trace().empty() &&
+                runtime.script_trace().front().source == entry,
+            "Vasu execution begins at the retail script address");
+        check(
+            runtime.original_state().read_actor(
+                instance->actor,
+                OriginalActorField::var3b) == 3,
+            "retail helper records the no-special-ring route in var3b");
+        check(
+            runtime.original_state().read(
+                OriginalStateKey::selected_text_option) == 1,
+            "retail option branches use the original selection key");
+    }
 
-    VasuInteractionRuntime replay;
+    VasuInteractionRuntime replay{rom};
     const std::array<InputAction, 5> actions{
         InputAction::a,
         InputAction::a,
@@ -268,22 +292,87 @@ void test_vasu_rom_scenario(
         replay.update(
             pressed_frame(action),
             player,
-            actors,
-            text_decoder);
+            actors);
     }
+    replay.update({}, player, actors);
     check(
         replay.deterministic_state() ==
             runtime.deterministic_state(),
         "identical semantic input reproduces Vasu state");
+    check(
+        replay.script_trace() == runtime.script_trace(),
+        "identical semantic input reproduces the complete script trace");
+
+    std::vector<std::uint8_t> opcodes;
+    for (const auto& event : runtime.script_trace()) {
+        opcodes.push_back(event.opcode);
+    }
+    const std::array expected_opcodes{
+        std::uint8_t{0x8d},
+        std::uint8_t{0x9b},
+        std::uint8_t{0xbe},
+        std::uint8_t{0x9e},
+        std::uint8_t{0xbd},
+        std::uint8_t{0xb5},
+        std::uint8_t{0xe0},
+        std::uint8_t{0xc6},
+        std::uint8_t{0x9a},
+        std::uint8_t{0xc3},
+        std::uint8_t{0xc3},
+        std::uint8_t{0xcc},
+        std::uint8_t{0x98},
+    };
+    check(
+        opcodes == std::vector<std::uint8_t>{
+            expected_opcodes.begin(),
+            expected_opcodes.end()},
+        "Vasu List scenario executes the expected retail opcode path");
+    return opcodes;
 }
 
 void test_vasu_rom_scenarios() {
-    test_vasu_rom_scenario(
+    using oracle::core::Campaign;
+    using oracle::script::OriginalActorField;
+    using oracle::script::OriginalStateKey;
+    using oracle::script::OriginalStateResolver;
+
+    check(
+        OriginalStateResolver::memory_key(
+            Campaign::ages,
+            0xc615) == OriginalStateKey::obtained_ring_box,
+        "original WRAM resolver names the ring-box byte");
+    check(
+        OriginalStateResolver::memory_key(
+            Campaign::seasons,
+            0xcba5) == OriginalStateKey::selected_text_option,
+        "original WRAM resolver names the text-option byte");
+    check(
+        OriginalStateResolver::global_flag_key(8) ==
+            OriginalStateKey::global_obtained_ring_box,
+        "original global flag index resolves independently of WRAM layout");
+    check(
+        OriginalStateResolver::actor_field(0x7b) ==
+            OriginalActorField::var3b,
+        "original interaction offset resolves to var3b");
+    check(
+        !OriginalStateResolver::memory_key(
+            Campaign::ages,
+            0xffff).has_value() &&
+            !OriginalStateResolver::global_flag_key(0xff).has_value() &&
+            !OriginalStateResolver::actor_field(0xff).has_value(),
+        "unknown original state coordinates remain unmapped");
+
+    const auto ages = test_vasu_rom_scenario(
         "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",
-        oracle::core::Campaign::ages);
-    test_vasu_rom_scenario(
+        Campaign::ages);
+    const auto seasons = test_vasu_rom_scenario(
         "roms/Legend of Zelda, The - Oracle of Seasons (USA).gbc",
-        oracle::core::Campaign::seasons);
+        Campaign::seasons);
+    if (!ages.empty() && !seasons.empty()) {
+        check(
+            ages == seasons,
+            "both relocated Vasu scripts share one native opcode path");
+    }
 }
 
 void test_item_primitives() {

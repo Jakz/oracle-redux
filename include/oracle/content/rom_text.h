@@ -32,6 +32,7 @@ struct DecodedMessage {
     std::vector<std::uint8_t> original_bytes;
     std::vector<TextAtom> atoms;
     std::vector<std::string> pages;
+    std::vector<std::string> option_labels;
     std::size_t option_count{};
 };
 

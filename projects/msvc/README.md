@@ -22,8 +22,9 @@ configuration output directory as the executable.
 - `OracleRoomSlice` builds the interactive BYO-ROM renderer. It is the default
   project to run and already has the local Ages US path configured as its
   debugger argument with `--vasu-scenario`. It renders authentic cartridge
-  pixels by default; use `WASD`/arrows to move, `Z` to talk, and `F1` for the
-  metatile diagnostic view.
+  pixels and executes the bounded retail Vasu script directly from that ROM;
+  use `WASD`/arrows to move, `Z` to talk, and `F1` for the metatile diagnostic
+  view.
 - `OracleRuntimeTests` builds all headless runtime sources and the native test
   executable. Set it as the startup project and press `Ctrl+F5` to run it.
 - `SDL3` is the unmodified project from the ignored SDL checkout.

@@ -3,7 +3,9 @@
 Oracle Redux will preserve the original campaign scripts as ROM-supplied
 content and run them through a native C++ interpreter. This document describes
 the formats established from the exact US ROMs and the corresponding
-`oracles-disasm` sources. No script runtime is implemented yet.
+`oracles-disasm` sources. A bounded native runtime now executes the shared
+post-ring-box Vasu route directly from either cartridge; the remaining command
+families are catalogued here but are not yet implemented.
 
 ## Formats at a glance
 
@@ -167,8 +169,48 @@ host-command inventory is a prerequisite for full campaign script coverage.
 
 Raw memory commands such as `writememory`, `jumpifmemoryeq`, and object-byte
 operations require a similar typed mapping from original addresses to runtime
-state. The policy for that mapping remains an architectural decision; direct
-host-memory access is not permitted.
+state. `OriginalStateResolver` establishes that boundary: WRAM addresses,
+global-flag indices, and actor-byte offsets resolve to separate typed key
+domains. Unknown coordinates are rejected instead of becoming host-memory
+accesses.
+
+## Implemented Vasu coverage
+
+The first executable script profile starts at the retail `vasuScript` entry:
+
+| Campaign | Script entry | `vasu_checkEarnedSpecialRing` |
+| --- | ---: | ---: |
+| Ages | `$0c:$49de` | `$15:$42b2` |
+| Seasons | `$0b:$49e2` | `$15:$496b` |
+
+The supported command surface is deliberately the exact post-ring-box,
+no-special-ring route:
+
+| Opcode | Native operation used by the route |
+| ---: | --- |
+| `0x01`–`0x7f` | compact absolute jump |
+| `0x8d` | set collision radii |
+| `0x98`, `0x9a` | show exitable/nonexitable ROM text |
+| `0x9b`, `0x9e` | enable and wait for A-button interaction |
+| `0xb5` | conditional global-flag jump |
+| `0xbd`, `0xbe` | disable/enable player input |
+| `0xc3` | selected-option branch |
+| `0xc6` | actor-field jump table |
+| `0xcc` | actor-field comparison branch |
+| `0xe0` | validated native host call |
+
+The host bridge implements only the two campaign-specific addresses above.
+It reproduces their writes to interaction `var3a`/`var3b` through typed actor
+fields. The currently named original coordinates include `wObtainedRingBox`
+at `$c615`, `wSelectedTextOption` at `$cba5`, global flag `$08`, and actor
+offsets `$76`, `$77`, `$78`, `$7a`, and `$7b`.
+
+Instructions retain bank/address coordinates and raw bytes. Every executed
+instruction emits a deterministic trace event containing the tick, source,
+opcode, and scheduling outcome. Headless tests prove that the relocated Ages
+and Seasons scripts execute the same normalized opcode route. Unsupported
+opcodes, state coordinates, and helper targets fail with their cartridge
+coordinate.
 
 ## Movement scripts
 
@@ -209,17 +251,14 @@ Simple scripts drive short sound and tile sequences:
 As with the main language, immediate tile operations can continue in the same
 tick while waits yield.
 
-## Proposed native boundary
+## Native boundary
 
 ```text
 validated ROM Source
         |
         v
-Campaign Script decoder
+bounded Campaign Script decoder
   source address + raw operands
-        |
-        v
-typed immutable ScriptProgram
         |
         v
 ScriptInstance in an Actor Slot
@@ -238,8 +277,10 @@ Native Script Runtime
         +--> registered C++ host commands
 ```
 
-The interpreter belongs to authoritative simulation. Rendering consumes the
-events and snapshots it produces but never advances scripts.
+The interpreter belongs to authoritative simulation. The current decoder is
+on-demand rather than a complete immutable `ScriptProgram`; ahead-of-time
+reachable-program validation remains planned as coverage expands. Rendering
+consumes the events and snapshots it produces but never advances scripts.
 
 ## Decoder safety
 
@@ -257,12 +298,14 @@ The native decoder must:
 
 ## Coverage plan
 
-1. Catalog every standard-script entry point referenced by interaction
-   handlers and object data.
+1. Expand the current profile catalog to every standard-script entry point
+   referenced by interaction handlers and object data.
 2. Decode reachable instructions and emit a command/target inventory for both
    campaigns.
-3. Map raw state addresses and every `asm15` target to typed runtime services.
-4. Implement the scheduler, waits, branches, one-level calls, flags, and actor
+3. Expand Original State Keys and the host registry for every reachable raw
+   state coordinate and `asm15` target.
+4. Expand the implemented scheduler from its current same-tick/wait/dialogue
+   core to one-level calls, remaining waits, flags, and actor
    operations needed by the First Playable Slice.
 5. Add dialogue, item, audio, and tile-mutation host services.
 6. Add movement and simple-script interpreters.

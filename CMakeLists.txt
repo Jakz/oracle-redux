@@ -52,6 +52,14 @@ target_include_directories(oracle_content PUBLIC include)
 target_compile_features(oracle_content PUBLIC cxx_std_20)
 target_link_libraries(oracle_content PUBLIC oracle_core)
 
+add_library(oracle_script
+    src/script/campaign_script.cpp
+    src/script/original_state.cpp
+)
+target_include_directories(oracle_script PUBLIC include)
+target_compile_features(oracle_script PUBLIC cxx_std_20)
+target_link_libraries(oracle_script PUBLIC oracle_content oracle_input)
+
 add_library(oracle_gameplay
     src/gameplay/interaction_target.cpp
     src/gameplay/player_traversal.cpp
@@ -60,7 +68,10 @@ add_library(oracle_gameplay
 )
 target_include_directories(oracle_gameplay PUBLIC include)
 target_compile_features(oracle_gameplay PUBLIC cxx_std_20)
-target_link_libraries(oracle_gameplay PUBLIC oracle_content oracle_input)
+target_link_libraries(
+    oracle_gameplay
+    PUBLIC oracle_content oracle_input oracle_script
+)
 
 add_library(oracle_presentation
     src/presentation/camera.cpp
@@ -76,6 +87,7 @@ if(MSVC)
     target_compile_options(oracle_input PRIVATE /W4 /permissive-)
     target_compile_options(oracle_core PRIVATE /W4 /permissive-)
     target_compile_options(oracle_content PRIVATE /W4 /permissive-)
+    target_compile_options(oracle_script PRIVATE /W4 /permissive-)
     target_compile_options(oracle_gameplay PRIVATE /W4 /permissive-)
     target_compile_options(oracle_presentation PRIVATE /W4 /permissive-)
 else()
@@ -83,6 +95,7 @@ else()
     target_compile_options(oracle_input PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(oracle_core PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(oracle_content PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(oracle_script PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(oracle_gameplay PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(oracle_presentation PRIVATE -Wall -Wextra -Wpedantic)
 endif()

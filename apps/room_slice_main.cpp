@@ -1468,7 +1468,6 @@ int run_window(
     const oracle::content::LinkSpriteDecoder link_sprite_decoder{rom};
     const oracle::content::InteractionSpriteDecoder
         interaction_sprite_decoder{rom};
-    const oracle::content::RomTextDecoder text_decoder{rom};
     SDL_Texture* link_texture = SDL_CreateTexture(
         renderer,
         SDL_PIXELFORMAT_RGBA32,
@@ -1643,7 +1642,7 @@ int run_window(
         oracle::gameplay::RoomActorLoader::load(
             current_objects,
             current_actors);
-    oracle::gameplay::VasuInteractionRuntime vasu_runtime;
+    oracle::gameplay::VasuInteractionRuntime vasu_runtime{rom};
     oracle::input::SemanticInputSampler semantic_input;
     const auto reload_current_objects = [&]() {
         current_objects = object_decoder.decode(
@@ -1861,8 +1860,7 @@ int run_window(
                 vasu_runtime.update(
                     input_frame,
                     current_player,
-                    current_actors,
-                    text_decoder);
+                    current_actors);
                 const auto traversal =
                     oracle::gameplay::PlayerTraversal::step(
                         current_player,

@@ -84,8 +84,9 @@ rectangle centers.
 
 The decoder keeps the decompressed original byte stream and produces atoms for
 glyphs, newlines, colors, substitutions, stops, option markers, symbols, and
-unhandled commands. It does not bake dialogue into a texture or discard
-control flow.
+unhandled commands. Option labels are derived from the original option-marker
+stream rather than supplied by C++. It does not bake dialogue into a texture
+or discard control flow.
 
 For the selected post-ring-box scenario, Vasu follows the original normal
 welcome route:
@@ -103,16 +104,29 @@ content for this branch.
 
 ## Current fidelity boundary
 
-This stage deliberately boots with `GLOBALFLAG_OBTAINED_RING_BOX` conceptually
-set, no earned special ring, and empty appraised/unappraised lists. It covers a
-real branch of `vasuScript`, not the first-visit ring tutorial.
+This stage deliberately boots with `GLOBALFLAG_OBTAINED_RING_BOX` set, no
+earned special ring, and empty appraised/unappraised lists. It covers a real
+branch of `vasuScript`, not the first-visit ring tutorial.
 
-The typed `VasuInteractionRuntime` currently implements only that bounded
-branch. It validates deterministic Input Frame replay and immutable Semantic UI
-output, but it is not yet the general Campaign Script interpreter. The next
-stage must decode the script bytecode, map its referenced WRAM addresses to
-Original State Keys, and make this same visible result emerge from the generic
-interpreter before expanding the first-visit path.
+`VasuInteractionRuntime` is now only the scenario adapter. It locates the
+ROM-instantiated Vasu actor, establishes the documented starting state, and
+starts the generic `CampaignScriptRuntime` at:
+
+| Campaign | Retail entry |
+| --- | ---: |
+| Ages | `$0c:$49de` |
+| Seasons | `$0b:$49e2` |
+
+The runtime decodes and executes the cartridge bytes on demand, including the
+global-flag branch, campaign-specific bank-`$15` host helper, actor-field jump
+table, text-option branches, and ROM message commands. It uses typed Original
+State Keys for original global flags and actor offsets. An instruction trace
+retains the original source coordinates and scheduling outcomes.
+
+Coverage is intentionally fail-closed: only opcodes and the two helper targets
+reached by this route are registered. The first-visit ring tutorial, ring-list
+state, broad script coverage, and NPC solid-body collision remain outside this
+slice.
 
 ## Developer scenario
 

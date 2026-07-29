@@ -1,7 +1,9 @@
 #include "oracle/content/rom_text.h"
 
 #include <cstddef>
+#include <optional>
 #include <stdexcept>
+#include <utility>
 
 namespace oracle::content {
 namespace {
@@ -197,6 +199,15 @@ TextAtom decode_atom(
     return TextAtom{TextAtomKind::command, parameter};
 }
 
+std::string trim_option(std::string value) {
+    const auto first = value.find_first_not_of(" \n\r\t");
+    if (first == std::string::npos) {
+        return {};
+    }
+    const auto last = value.find_last_not_of(" \n\r\t");
+    return value.substr(first, last - first + 1);
+}
+
 }  // namespace
 
 RomTextDecoder::RomTextDecoder(const RomSource& rom) : rom_{rom} {}
@@ -221,6 +232,7 @@ DecodedMessage RomTextDecoder::decode(const MessageId id) const {
         .original_bytes = bytes,
     };
     std::string page;
+    std::optional<std::size_t> active_option;
     for (std::size_t cursor = 0; cursor < bytes.size(); ++cursor) {
         const auto byte = bytes[cursor];
         if (byte == 0) {
@@ -238,6 +250,21 @@ DecodedMessage RomTextDecoder::decode(const MessageId id) const {
         message.atoms.push_back(atom);
         if (atom.kind == TextAtomKind::option) {
             ++message.option_count;
+            message.option_labels.emplace_back();
+            active_option = message.option_labels.size() - 1;
+        } else if (
+            active_option.has_value() &&
+            atom.kind == TextAtomKind::glyph) {
+            message.option_labels[*active_option].push_back(atom.glyph);
+        } else if (
+            active_option.has_value() &&
+            atom.kind == TextAtomKind::substitution) {
+            message.option_labels[*active_option].append(
+                atom.value == 0 ? "Link" : "Child");
+        } else if (
+            active_option.has_value() &&
+            atom.kind == TextAtomKind::new_line) {
+            active_option.reset();
         }
         if (atom.kind == TextAtomKind::stop) {
             message.pages.push_back(page);
@@ -248,6 +275,9 @@ DecodedMessage RomTextDecoder::decode(const MessageId id) const {
     }
     if (!page.empty() || message.pages.empty()) {
         message.pages.push_back(page);
+    }
+    for (auto& option : message.option_labels) {
+        option = trim_option(std::move(option));
     }
     return message;
 }
