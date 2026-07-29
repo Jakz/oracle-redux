@@ -24,8 +24,9 @@ configuration output directory as the executable.
   debugger argument. A ROM-only launch always opens the newest playable
   fidelity slice, currently Octorok combat. This remains true when Visual
   Studio has cached an old `.vcxproj.user` launch entry. It renders authentic
-  cartridge pixels and Octorok OAM, runs the shared native enemy state machine,
-  applies contact damage, and exposes `X` as the provisional sword strike.
+  cartridge pixels plus Octorok and projectile OAM, runs the shared native
+  enemy/part state machines, applies enemy and projectile damage, and exposes
+  `X` as the provisional sword strike.
   The Vasu scenario remains available with `--vasu-scenario`; use
   `WASD`/arrows to move, `Z` to talk, and `F1` for the metatile diagnostic
   view. Use `--explore`, or explicit `--group` and `--room` arguments, to start

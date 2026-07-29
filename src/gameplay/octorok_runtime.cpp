@@ -14,6 +14,7 @@ namespace oracle::gameplay {
 namespace {
 
 constexpr std::uint8_t octorok_enemy_id = 0x09;
+constexpr std::uint8_t octorok_projectile_part_id = 0x18;
 constexpr std::array<std::uint8_t, 8> counter_values{
     30, 45, 60, 75, 45, 60, 75, 90,
 };
@@ -25,6 +26,17 @@ constexpr std::array<std::uint8_t, 5> decision_masks{
 };
 constexpr std::uint8_t sword_duration_ticks = 8;
 constexpr std::uint8_t player_damage_invincibility_ticks = 60;
+constexpr std::int32_t projectile_speed_subpixels = 0x200;
+constexpr std::int32_t projectile_bounce_speed_subpixels = 0x40;
+constexpr std::int32_t projectile_bounce_velocity_subpixels = 0xe0;
+constexpr std::int32_t projectile_gravity_subpixels = 0x0e;
+constexpr std::uint8_t projectile_bounce_ticks = 0x20;
+
+enum class ProjectileTerrainResult {
+    clear,
+    solid,
+    out_of_bounds,
+};
 
 bool shares_actor_space(
     const core::WorldRoomId left,
@@ -153,6 +165,103 @@ bool enemy_position_is_clear(
     return true;
 }
 
+ProjectileTerrainResult projectile_terrain_result(
+    const core::ActorSlotState& actor,
+    const std::int16_t x,
+    const std::int16_t y,
+    const EnemyCollisionLookup& collision_lookup) {
+    const auto* collisions = collision_lookup(actor.room);
+    if (collisions == nullptr) {
+        return ProjectileTerrainResult::out_of_bounds;
+    }
+    const auto width = static_cast<int>(
+        collisions->columns * content::metatile_world_size);
+    const auto height = static_cast<int>(
+        collisions->rows * content::metatile_world_size);
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+        return ProjectileTerrainResult::out_of_bounds;
+    }
+    const auto pixel_x = static_cast<std::size_t>(x);
+    const auto pixel_y = static_cast<std::size_t>(y);
+    const auto column =
+        pixel_x /
+        static_cast<std::size_t>(content::metatile_world_size);
+    const auto row =
+        pixel_y /
+        static_cast<std::size_t>(content::metatile_world_size);
+    const auto local_x = static_cast<std::uint8_t>(
+        pixel_x %
+        static_cast<std::size_t>(content::metatile_world_size));
+    const auto local_y = static_cast<std::uint8_t>(
+        pixel_y %
+        static_cast<std::size_t>(content::metatile_world_size));
+    return content::RoomCollisionDecoder::is_solid(
+        collisions->at(column, row),
+        local_x,
+        local_y,
+        content::CollisionProfile::
+            grounded_actor_without_small_bridges)
+        ? ProjectileTerrainResult::solid
+        : ProjectileTerrainResult::clear;
+}
+
+std::pair<std::int32_t, std::int32_t> cardinal_velocity(
+    const std::uint8_t angle,
+    const std::int32_t speed_subpixels) noexcept {
+    switch (angle & 0x18) {
+    case 0x00:
+        return {0, -speed_subpixels};
+    case 0x08:
+        return {speed_subpixels, 0};
+    case 0x10:
+        return {0, speed_subpixels};
+    case 0x18:
+        return {-speed_subpixels, 0};
+    }
+    return {};
+}
+
+std::pair<int, int> apply_subpixel_velocity(
+    std::int32_t& subpixel_x,
+    std::int32_t& subpixel_y,
+    const std::int32_t velocity_x,
+    const std::int32_t velocity_y) noexcept {
+    subpixel_x += velocity_x;
+    subpixel_y += velocity_y;
+    int delta_x = 0;
+    int delta_y = 0;
+    while (subpixel_x >= 256) {
+        ++delta_x;
+        subpixel_x -= 256;
+    }
+    while (subpixel_x <= -256) {
+        --delta_x;
+        subpixel_x += 256;
+    }
+    while (subpixel_y >= 256) {
+        ++delta_y;
+        subpixel_y -= 256;
+    }
+    while (subpixel_y <= -256) {
+        --delta_y;
+        subpixel_y += 256;
+    }
+    return {delta_x, delta_y};
+}
+
+void apply_contact_damage(
+    const core::ActorSlotState& actor,
+    PlayerCombatState& combat) noexcept {
+    const auto damage = static_cast<std::uint8_t>(
+        std::min(
+            0x7f,
+            std::abs(static_cast<int>(actor.contact_damage))));
+    combat.health = damage >= combat.health
+        ? 0
+        : static_cast<std::uint8_t>(combat.health - damage);
+    combat.invincibility_ticks = player_damage_invincibility_ticks;
+}
+
 }  // namespace
 
 OctorokScenarioDefinition octorok_scenario(
@@ -174,15 +283,196 @@ OctorokScenarioDefinition octorok_scenario(
 OctorokRuntime::OctorokRuntime(
     const content::RomSource& rom,
     const std::uint16_t rng_seed)
-    : rom_{rom}, definitions_{rom} {
+    : rom_{rom}, definitions_{rom}, part_definitions_{rom} {
     reset(rng_seed);
 }
 
 void OctorokRuntime::reset(const std::uint16_t rng_seed) noexcept {
     actor_runtime_ = {};
+    projectile_runtime_ = {};
     rng_low_ = static_cast<std::uint8_t>(rng_seed & 0xff);
     rng_high_ = static_cast<std::uint8_t>(rng_seed >> 8u);
     sword_ticks_ = 0;
+}
+
+void OctorokRuntime::initialize_projectile(
+    const std::size_t slot,
+    core::ActorSlotState& actor) {
+    const auto definition =
+        part_definitions_.decode(actor.identity.id);
+    actor.collision_radius_y = definition.collision_radius_y;
+    actor.collision_radius_x = definition.collision_radius_x;
+    actor.maximum_health = definition.health;
+    actor.health = definition.health;
+    actor.contact_damage = definition.contact_damage;
+    actor.blocks_player = false;
+
+    auto& runtime = projectile_runtime_[slot];
+    runtime = ProjectileRuntime{};
+    runtime.generation = actor.generation;
+    runtime.initialized = true;
+    runtime.phase = OctorokProjectilePhase::flying;
+    runtime.angle =
+        static_cast<std::uint8_t>(actor.identity.parameter & 0x1f);
+    runtime.speed_subpixels = projectile_speed_subpixels;
+}
+
+bool OctorokRuntime::spawn_projectile(
+    const core::ActorSlotState& source,
+    const std::uint8_t angle,
+    core::ActorSlotDomain& actors) {
+    const auto handle = actors.allocate_dynamic(
+        core::ActorCategory::part,
+        core::ActorIdentity{
+            .id = octorok_projectile_part_id,
+            .parameter =
+                static_cast<std::uint8_t>(angle & 0x1f),
+        },
+        source.room,
+        source.local_x,
+        source.local_y,
+        true,
+        false,
+        source.source_record_index);
+    if (!handle.has_value()) {
+        return false;
+    }
+    auto* projectile = actors.get(*handle);
+    if (projectile == nullptr) {
+        return false;
+    }
+    initialize_projectile(handle->slot, *projectile);
+    return true;
+}
+
+void OctorokRuntime::update_projectiles(
+    const PlayerState& player,
+    PlayerCombatState& combat,
+    core::ActorSlotDomain& actors,
+    const EnemyCollisionLookup& collision_lookup,
+    OctorokStepReport& report) {
+    const auto part_slots = actors.slots(core::ActorCategory::part);
+    for (std::size_t slot = 0; slot < part_slots.size(); ++slot) {
+        const auto& immutable_actor = part_slots[slot];
+        if (
+            !immutable_actor.active ||
+            immutable_actor.identity.id !=
+                octorok_projectile_part_id) {
+            continue;
+        }
+        const core::ActorSlotHandle handle{
+            core::ActorCategory::part,
+            static_cast<std::uint8_t>(slot),
+            immutable_actor.generation,
+        };
+        auto* actor = actors.get(handle);
+        if (actor == nullptr) {
+            continue;
+        }
+        auto& runtime = projectile_runtime_[slot];
+        if (
+            !runtime.initialized ||
+            runtime.generation != actor->generation) {
+            initialize_projectile(slot, *actor);
+            continue;
+        }
+
+        switch (runtime.phase) {
+        case OctorokProjectilePhase::flying: {
+            const auto [velocity_x, velocity_y] =
+                cardinal_velocity(
+                    runtime.angle,
+                    runtime.speed_subpixels);
+            auto candidate_subpixel_x = runtime.subpixel_x;
+            auto candidate_subpixel_y = runtime.subpixel_y;
+            const auto [delta_x, delta_y] =
+                apply_subpixel_velocity(
+                    candidate_subpixel_x,
+                    candidate_subpixel_y,
+                    velocity_x,
+                    velocity_y);
+            const auto candidate_x = static_cast<std::int16_t>(
+                actor->local_x + delta_x);
+            const auto candidate_y = static_cast<std::int16_t>(
+                actor->local_y + delta_y);
+            const auto terrain = projectile_terrain_result(
+                *actor,
+                candidate_x,
+                candidate_y,
+                collision_lookup);
+            if (terrain == ProjectileTerrainResult::out_of_bounds) {
+                (void)actors.release(handle);
+                ++report.projectiles_expired;
+                continue;
+            }
+            if (terrain == ProjectileTerrainResult::solid) {
+                runtime.phase = OctorokProjectilePhase::impact;
+                ++report.projectile_impacts;
+                continue;
+            }
+            runtime.subpixel_x = candidate_subpixel_x;
+            runtime.subpixel_y = candidate_subpixel_y;
+            actor->local_x = candidate_x;
+            actor->local_y = candidate_y;
+            if (overlaps_player(*actor, player)) {
+                if (
+                    combat.invincibility_ticks == 0 &&
+                    combat.health != 0) {
+                    apply_contact_damage(*actor, combat);
+                    ++report.projectile_contacts;
+                }
+                runtime.phase = OctorokProjectilePhase::impact;
+                ++report.projectile_impacts;
+            }
+            break;
+        }
+        case OctorokProjectilePhase::impact:
+            runtime.phase = OctorokProjectilePhase::bouncing;
+            runtime.counter = projectile_bounce_ticks;
+            runtime.angle =
+                static_cast<std::uint8_t>(runtime.angle ^ 0x10);
+            runtime.speed_subpixels =
+                projectile_bounce_speed_subpixels;
+            runtime.subpixel_x = 0;
+            runtime.subpixel_y = 0;
+            runtime.elevation_subpixels = 0;
+            runtime.vertical_velocity_subpixels =
+                projectile_bounce_velocity_subpixels;
+            break;
+        case OctorokProjectilePhase::bouncing: {
+            if (runtime.counter != 0) {
+                --runtime.counter;
+            }
+            if (runtime.counter == 0) {
+                (void)actors.release(handle);
+                ++report.projectiles_expired;
+                continue;
+            }
+            runtime.elevation_subpixels =
+                std::max(
+                    0,
+                    runtime.elevation_subpixels +
+                        runtime.vertical_velocity_subpixels);
+            runtime.vertical_velocity_subpixels -=
+                projectile_gravity_subpixels;
+            const auto [velocity_x, velocity_y] =
+                cardinal_velocity(
+                    runtime.angle,
+                    runtime.speed_subpixels);
+            const auto [delta_x, delta_y] =
+                apply_subpixel_velocity(
+                    runtime.subpixel_x,
+                    runtime.subpixel_y,
+                    velocity_x,
+                    velocity_y);
+            actor->local_x = static_cast<std::int16_t>(
+                actor->local_x + delta_x);
+            actor->local_y = static_cast<std::int16_t>(
+                actor->local_y + delta_y);
+            break;
+        }
+        }
+    }
 }
 
 OctorokRuntime::RandomStep OctorokRuntime::next_random() noexcept {
@@ -340,6 +630,12 @@ OctorokStepReport OctorokRuntime::update(
             --runtime.hit_invincibility;
         }
     }
+    update_projectiles(
+        player,
+        combat,
+        actors,
+        collision_lookup,
+        report);
     if (input.pressed(input::InputAction::b)) {
         sword_ticks_ = sword_duration_ticks;
         report.sword_started = true;
@@ -431,6 +727,12 @@ OctorokStepReport OctorokRuntime::update(
                 runtime.phase = OctorokPhase::standing;
                 runtime.counter = 0x20;
                 ++report.projectiles_requested;
+                if (spawn_projectile(
+                        *actor,
+                        runtime.angle,
+                        actors)) {
+                    ++report.projectiles_spawned;
+                }
             }
             break;
         }
@@ -481,15 +783,7 @@ OctorokStepReport OctorokRuntime::update(
                 !overlaps_player(actor, player)) {
                 continue;
             }
-            const auto damage = static_cast<std::uint8_t>(
-                std::min(
-                    0x7f,
-                    std::abs(static_cast<int>(actor.contact_damage))));
-            combat.health = damage >= combat.health
-                ? 0
-                : static_cast<std::uint8_t>(combat.health - damage);
-            combat.invincibility_ticks =
-                player_damage_invincibility_ticks;
+            apply_contact_damage(actor, combat);
             ++report.contacts;
             break;
         }
@@ -498,6 +792,34 @@ OctorokStepReport OctorokRuntime::update(
         --sword_ticks_;
     }
     return report;
+}
+
+std::optional<OctorokProjectilePhase>
+OctorokRuntime::projectile_phase(
+    const core::ActorSlotHandle actor) const noexcept {
+    if (
+        actor.category != core::ActorCategory::part ||
+        actor.slot >= projectile_runtime_.size()) {
+        return std::nullopt;
+    }
+    const auto& runtime = projectile_runtime_[actor.slot];
+    if (
+        !runtime.initialized ||
+        runtime.generation != actor.generation) {
+        return std::nullopt;
+    }
+    return runtime.phase;
+}
+
+double OctorokRuntime::projectile_elevation(
+    const core::ActorSlotHandle actor) const noexcept {
+    if (!projectile_phase(actor).has_value()) {
+        return 0.0;
+    }
+    return
+        static_cast<double>(
+            projectile_runtime_[actor.slot].elevation_subpixels) /
+        256.0;
 }
 
 std::optional<std::uint8_t> OctorokRuntime::animation_index(
@@ -582,6 +904,22 @@ std::uint64_t OctorokRuntime::deterministic_state() const noexcept {
         append(runtime.walk_counter);
         append(runtime.angle);
         append(runtime.animation_tick);
+        append(runtime.initialized);
+    }
+    for (const auto& runtime : projectile_runtime_) {
+        append(runtime.generation);
+        append(static_cast<std::uint8_t>(runtime.phase));
+        append(runtime.counter);
+        append(runtime.angle);
+        append(static_cast<std::uint32_t>(runtime.speed_subpixels));
+        append(static_cast<std::uint32_t>(runtime.subpixel_x));
+        append(static_cast<std::uint32_t>(runtime.subpixel_y));
+        append(
+            static_cast<std::uint32_t>(
+                runtime.elevation_subpixels));
+        append(
+            static_cast<std::uint32_t>(
+                runtime.vertical_velocity_subpixels));
         append(runtime.initialized);
     }
     return result;

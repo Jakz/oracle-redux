@@ -41,6 +41,8 @@ add_library(oracle_content
     src/content/enemy_sprite.cpp
     src/content/interaction_sprite.cpp
     src/content/link_sprite.cpp
+    src/content/part_data.cpp
+    src/content/part_sprite.cpp
     src/content/rom_source.cpp
     src/content/rom_text.cpp
     src/content/room_objects.cpp

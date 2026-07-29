@@ -12,6 +12,8 @@
 
 #include "oracle/content/interaction_sprite.h"
 #include "oracle/content/link_sprite.h"
+#include "oracle/content/part_data.h"
+#include "oracle/content/part_sprite.h"
 #include "oracle/content/enemy_data.h"
 #include "oracle/content/enemy_sprite.h"
 #include "oracle/content/rom_source.h"
@@ -487,6 +489,8 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
     }
     using oracle::content::EnemyDefinitionDecoder;
     using oracle::content::EnemySpriteDecoder;
+    using oracle::content::PartDefinitionDecoder;
+    using oracle::content::PartSpriteDecoder;
     using oracle::content::RomSource;
     using oracle::content::RoomObjectDecoder;
     using oracle::core::ActorCategory;
@@ -536,6 +540,39 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
                 return pixel.alpha != 0;
             }),
         "Octorok frame contains authentic decoded ROM pixels");
+
+    const auto projectile_definition =
+        PartDefinitionDecoder{rom}.decode(0x18);
+    check(
+        projectile_definition.object_gfx_header ==
+            definition.object_gfx_header &&
+            projectile_definition.collision_enabled &&
+            projectile_definition.collision_mode == 0x07 &&
+            projectile_definition.collision_radius_y == 2 &&
+            projectile_definition.collision_radius_x == 2 &&
+            projectile_definition.contact_damage == -4 &&
+            projectile_definition.health == 0x40 &&
+            projectile_definition.tile_base == 0x0c &&
+            projectile_definition.oam_flags == 0x03,
+        "Octorok projectile attributes decode from relocated partData");
+    const auto projectile_sprite =
+        PartSpriteDecoder{rom}.decode_octorok_projectile();
+    check(
+        projectile_sprite.part_id == 0x18 &&
+            projectile_sprite.original_oam_index == 0 &&
+            projectile_sprite.width == 16 &&
+            projectile_sprite.height == 16 &&
+            projectile_sprite.origin_x == -8 &&
+            projectile_sprite.origin_y == 8,
+        "Octorok projectile follows its original two-object part OAM");
+    check(
+        std::any_of(
+            projectile_sprite.pixels.begin(),
+            projectile_sprite.pixels.end(),
+            [](const oracle::content::RgbaPixel pixel) {
+                return pixel.alpha != 0;
+            }),
+        "Octorok projectile frame contains decoded ROM pixels");
 
     const auto scenario =
         oracle::gameplay::octorok_scenario(campaign);
@@ -608,6 +645,127 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
         oracle::gameplay::collect_actor_collision_bodies(actors).size() == 0,
         "enemy contact remains separate from solid NPC collision");
 
+    ActorSlotDomain impact_actors;
+    const auto impact_handle = impact_actors.allocate_dynamic(
+        ActorCategory::part,
+        oracle::core::ActorIdentity{
+            .id = 0x18,
+            .parameter = 0x08,
+        },
+        scenario.room,
+        30,
+        24,
+        true,
+        false,
+        0);
+    check(
+        impact_handle.has_value(),
+        "Octorok projectile allocates in the original part band");
+    OctorokRuntime impact_runtime{rom};
+    PlayerCombatState impact_combat;
+    const auto distant_player = PlayerState{
+        .room = scenario.room,
+        .local_x = 120.0,
+        .local_y = 96.0,
+    };
+    clear_room.values[1 * 10 + 2] = 0x0f;
+    (void)impact_runtime.update(
+        {},
+        distant_player,
+        impact_combat,
+        impact_actors,
+        collision_lookup);
+    const auto impact = impact_runtime.update(
+        {},
+        distant_player,
+        impact_combat,
+        impact_actors,
+        collision_lookup);
+    check(
+        impact.projectile_impacts == 1 &&
+            impact_handle.has_value() &&
+            impact_runtime.projectile_phase(*impact_handle) ==
+                oracle::gameplay::OctorokProjectilePhase::impact,
+        "projectile enters its retail impact state at solid terrain");
+    (void)impact_runtime.update(
+        {},
+        distant_player,
+        impact_combat,
+        impact_actors,
+        collision_lookup);
+    check(
+        impact_handle.has_value() &&
+            impact_runtime.projectile_phase(*impact_handle) ==
+                oracle::gameplay::OctorokProjectilePhase::bouncing,
+        "terrain impact reverses the projectile into a bounded bounce");
+    (void)impact_runtime.update(
+        {},
+        distant_player,
+        impact_combat,
+        impact_actors,
+        collision_lookup);
+    check(
+        impact_handle.has_value() &&
+            impact_runtime.projectile_elevation(*impact_handle) > 0.0,
+        "bouncing projectile exposes original vertical motion");
+    for (int tick = 0; tick < 32; ++tick) {
+        (void)impact_runtime.update(
+            {},
+            distant_player,
+            impact_combat,
+            impact_actors,
+            collision_lookup);
+    }
+    check(
+        impact_actors.active_count(ActorCategory::part) == 0,
+        "projectile releases its part slot after the 32-tick bounce");
+    clear_room.values[1 * 10 + 2] = 0;
+
+    ActorSlotDomain projectile_contact_actors;
+    const auto contact_handle =
+        projectile_contact_actors.allocate_dynamic(
+            ActorCategory::part,
+            oracle::core::ActorIdentity{
+                .id = 0x18,
+                .parameter = 0x08,
+            },
+            scenario.room,
+            40,
+            40,
+            true,
+            false,
+            0);
+    OctorokRuntime projectile_contact_runtime{rom};
+    PlayerCombatState projectile_combat;
+    const auto projectile_target = PlayerState{
+        .room = scenario.room,
+        .local_x = 42.0,
+        .local_y = 40.0,
+    };
+    (void)projectile_contact_runtime.update(
+        {},
+        projectile_target,
+        projectile_combat,
+        projectile_contact_actors,
+        collision_lookup);
+    const auto projectile_contact =
+        projectile_contact_runtime.update(
+            {},
+            projectile_target,
+            projectile_combat,
+            projectile_contact_actors,
+            collision_lookup);
+    check(
+        contact_handle.has_value() &&
+            projectile_contact.projectile_contacts == 1 &&
+            projectile_combat.health == 8 &&
+            projectile_combat.invincibility_ticks != 0,
+        "projectile contact applies partData's four health-unit damage");
+    check(
+        oracle::gameplay::collect_actor_collision_bodies(
+            projectile_contact_actors).size() == 0,
+        "damaging projectile parts do not become solid NPC bodies");
+
     const auto locate_octorok = [&]()
         -> const oracle::core::ActorSlotState* {
         const auto slots = actors.slots(ActorCategory::enemy);
@@ -675,20 +833,25 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
         .local_x = 8.0,
         .local_y = 8.0,
     };
-    for (int tick = 0; tick < 180; ++tick) {
-        (void)replay.update(
+    std::uint32_t replay_projectiles = 0;
+    for (int tick = 0; tick < 1200; ++tick) {
+        const auto step = replay.update(
             {},
             replay_player,
             replay_combat,
             replay_actors,
             collision_lookup);
+        replay_projectiles += step.projectiles_spawned;
     }
+    check(
+        replay_projectiles != 0,
+        "Octorok shooting requests allocate projectile part slots");
 
     ActorSlotDomain second_replay_actors;
     (void)RoomActorLoader::load(catalog, second_replay_actors);
     OctorokRuntime second_replay{rom, 0x5a17};
     PlayerCombatState second_replay_combat;
-    for (int tick = 0; tick < 180; ++tick) {
+    for (int tick = 0; tick < 1200; ++tick) {
         (void)second_replay.update(
             {},
             replay_player,

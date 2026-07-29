@@ -184,8 +184,11 @@ positioned Octorok room for either campaign:
 build/oracle_room_slice path/to/oracle.gbc --octorok-scenario
 ```
 
-Use `X` for the provisional semantic sword strike. The decoded enemy path,
-exact/provisional boundary, and next projectile step are documented in
+Octoroks now allocate their original `$18` projectile in the bounded part
+band. Its ROM graphics, wall impact, reverse bounce, expiry, and player damage
+are active. Use `X` for the provisional semantic sword strike. The decoded
+enemy and projectile paths, exact/provisional boundary, and next sword step
+are documented in
 [`docs/reverse-engineering/octorok-combat-slice.md`](docs/reverse-engineering/octorok-combat-slice.md).
 
 Choose another room by its hexadecimal overworld coordinate:

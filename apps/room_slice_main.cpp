@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "oracle/content/link_sprite.h"
+#include "oracle/content/part_sprite.h"
 #include "oracle/content/interaction_sprite.h"
 #include "oracle/content/enemy_sprite.h"
 #include "oracle/content/rom_source.h"
@@ -684,6 +685,91 @@ void render_octorok_actors(
                 static_cast<float>(frame.origin_x * camera.zoom),
             screen_y +
                 static_cast<float>(frame.origin_y * camera.zoom),
+            static_cast<float>(frame.width * camera.zoom),
+            static_cast<float>(frame.height * camera.zoom),
+        };
+        SDL_RenderTexture(renderer, texture, &source, &destination);
+    }
+}
+
+void render_octorok_projectiles(
+    SDL_Renderer* renderer,
+    SDL_Texture* texture,
+    const oracle::content::PartSpriteFrame& frame,
+    const oracle::gameplay::OctorokRuntime& runtime,
+    const oracle::core::ActorSlotDomain& actors,
+    const std::vector<RoomPlacement>& rooms,
+    const oracle::gameplay::PlayerState& player,
+    const bool in_front_of_player,
+    const CameraState camera,
+    const int output_width,
+    const int output_height) {
+    const auto player_world_y =
+        oracle::gameplay::PlayerTraversal::world_y(player);
+    const auto part_slots =
+        actors.slots(oracle::core::ActorCategory::part);
+    for (std::size_t slot = 0; slot < part_slots.size(); ++slot) {
+        const auto& actor = part_slots[slot];
+        if (
+            !actor.active ||
+            !actor.positioned ||
+            actor.identity.id != 0x18) {
+            continue;
+        }
+        const auto placement = std::find_if(
+            rooms.begin(),
+            rooms.end(),
+            [&](const RoomPlacement& candidate) {
+                return candidate.layout.id == actor.room;
+            });
+        if (placement == rooms.end()) {
+            continue;
+        }
+        const auto world_x = placement->world_x + actor.local_x;
+        const auto ground_y = placement->world_y + actor.local_y;
+        if ((ground_y > player_world_y) != in_front_of_player) {
+            continue;
+        }
+        const oracle::core::ActorSlotHandle handle{
+            oracle::core::ActorCategory::part,
+            static_cast<std::uint8_t>(slot),
+            actor.generation,
+        };
+        if (!runtime.projectile_phase(handle).has_value()) {
+            continue;
+        }
+        const auto screen_x = static_cast<float>(
+            (world_x - camera.x) * camera.zoom +
+            output_width * 0.5);
+        const auto screen_ground_y = static_cast<float>(
+            (ground_y - camera.y) * camera.zoom +
+            output_height * 0.5);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, 4, 10, 14, 105);
+        const SDL_FRect shadow{
+            screen_x - static_cast<float>(4.0 * camera.zoom),
+            screen_ground_y +
+                static_cast<float>(8.0 * camera.zoom),
+            static_cast<float>(8.0 * camera.zoom),
+            std::max(
+                1.0f,
+                static_cast<float>(2.0 * camera.zoom)),
+        };
+        SDL_RenderFillRect(renderer, &shadow);
+
+        const auto elevation = runtime.projectile_elevation(handle);
+        const SDL_FRect source{
+            0.0f,
+            0.0f,
+            static_cast<float>(frame.width),
+            static_cast<float>(frame.height),
+        };
+        const SDL_FRect destination{
+            screen_x +
+                static_cast<float>(frame.origin_x * camera.zoom),
+            screen_ground_y +
+                static_cast<float>(
+                    (frame.origin_y - elevation) * camera.zoom),
             static_cast<float>(frame.width * camera.zoom),
             static_cast<float>(frame.height * camera.zoom),
         };
@@ -1612,6 +1698,9 @@ int run_window(
     const oracle::content::InteractionSpriteDecoder
         interaction_sprite_decoder{rom};
     const oracle::content::EnemySpriteDecoder enemy_sprite_decoder{rom};
+    const oracle::content::PartSpriteDecoder part_sprite_decoder{rom};
+    const auto octorok_projectile_frame =
+        part_sprite_decoder.decode_octorok_projectile();
     SDL_Texture* link_texture = SDL_CreateTexture(
         renderer,
         SDL_PIXELFORMAT_RGBA32,
@@ -1639,6 +1728,31 @@ int run_window(
     }
     SDL_SetTextureScaleMode(octorok_texture, SDL_SCALEMODE_NEAREST);
     SDL_SetTextureBlendMode(octorok_texture, SDL_BLENDMODE_BLEND);
+    SDL_Texture* projectile_texture = SDL_CreateTexture(
+        renderer,
+        SDL_PIXELFORMAT_RGBA32,
+        SDL_TEXTUREACCESS_STATIC,
+        octorok_projectile_frame.width,
+        octorok_projectile_frame.height);
+    if (
+        projectile_texture == nullptr ||
+        !SDL_UpdateTexture(
+            projectile_texture,
+            nullptr,
+            octorok_projectile_frame.pixels.data(),
+            octorok_projectile_frame.width *
+                static_cast<int>(
+                    sizeof(oracle::content::RgbaPixel)))) {
+        throw std::runtime_error{
+            std::string{"projectile texture creation failed: "} +
+            SDL_GetError()};
+    }
+    SDL_SetTextureScaleMode(
+        projectile_texture,
+        SDL_SCALEMODE_NEAREST);
+    SDL_SetTextureBlendMode(
+        projectile_texture,
+        SDL_BLENDMODE_BLEND);
     std::array<SDL_Texture*, 3> vasu_textures{};
     for (auto*& texture : vasu_textures) {
         texture = SDL_CreateTexture(
@@ -2318,6 +2432,18 @@ int run_window(
                 render_camera,
                 output_width,
                 output_height);
+            render_octorok_projectiles(
+                renderer,
+                projectile_texture,
+                octorok_projectile_frame,
+                octorok_runtime,
+                current_actors,
+                rooms,
+                current_player,
+                false,
+                render_camera,
+                output_width,
+                output_height);
             render_vasu_actors(
                 renderer,
                 vasu_textures,
@@ -2385,6 +2511,18 @@ int run_window(
                 render_camera,
                 output_width,
                 output_height);
+            render_octorok_projectiles(
+                renderer,
+                projectile_texture,
+                octorok_projectile_frame,
+                octorok_runtime,
+                current_actors,
+                rooms,
+                current_player,
+                true,
+                render_camera,
+                output_width,
+                output_height);
             render_vasu_actors(
                 renderer,
                 vasu_textures,
@@ -2421,6 +2559,9 @@ int run_window(
                     ? "F3: hide object anchors"
                     : "F3: show object anchors")
             << " | actors " << actor_load_report.spawned.size()
+            << " parts "
+            << current_actors.active_count(
+                   oracle::core::ActorCategory::part)
             << " | HP "
             << static_cast<unsigned int>(player_combat.health)
             << '/'
@@ -2508,6 +2649,7 @@ int run_window(
 
     SDL_DestroyTexture(link_texture);
     SDL_DestroyTexture(octorok_texture);
+    SDL_DestroyTexture(projectile_texture);
     for (auto* texture : vasu_textures) {
         SDL_DestroyTexture(texture);
     }

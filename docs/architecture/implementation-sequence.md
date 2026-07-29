@@ -107,10 +107,14 @@ two-strike defeat loop. See
 
 ### Next implementation boundary
 
-Allocate and simulate the requested Octorok projectile part, including ROM
-attributes/OAM, terrain impact, and player damage. Then replace the diagnostic
-sword hitbox with the original sword item state and OAM path before broadening
-to random-position enemy records, drops, or another family.
+The requested Octorok projectile now allocates in the original part band,
+decodes campaign-relocated `partData` and OAM, travels at retail speed, impacts
+terrain, performs the bounded reverse bounce, expires, and applies its decoded
+player damage.
+
+Next, replace the diagnostic sword hitbox with the original sword item state,
+animation, and OAM path before broadening to random-position enemy records,
+drops, or another family.
 
 ## Following slices
 

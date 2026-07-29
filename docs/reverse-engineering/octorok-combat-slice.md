@@ -112,6 +112,41 @@ The sword rectangle is deliberately a visible diagnostic primitive. Original
 sword item state, animation, OAM, knockback, enemy hit effects, drops, and
 sound are not claimed by this slice.
 
+## Projectile part path
+
+The shooting request now allocates `PART_OCTOROK_PROJECTILE` (`$18`) in the
+original 16-slot part band and copies its source Octorok room, position, and
+cardinal angle. The generic `PartDefinitionDecoder` reads the retail eight-byte
+`partData` record:
+
+| Property | Ages | Seasons | Normalized value |
+| --- | --- | --- | --- |
+| `partData` | `3f:60cd` | `3f:6103` | campaign relocation |
+| part `$18` graphics header | `$8f` | `$74` | same Octorok sheet |
+| collision mode | `$87` | `$87` | enabled, mode `$07` |
+| collision radius | `$22` | `$22` | Y/X `$02/$02` |
+| damage | `$fc` | `$fc` | four quarter-heart units |
+| tile base / OAM flags | `$0c/$03` | `$0c/$03` | palette 3 |
+
+The part animation's first frame resolves through relocated pointer tables at
+Ages `16:7c52` and Seasons `15:77a7`. Both select a two-object 16x16 OAM
+composition using relative tile zero from the Octorok graphics sheet.
+
+The native state path preserves the meaningful retail constants:
+
+1. initialize visible with raw speed `$50`, which is 2 pixels per tick in the
+   original speed table;
+2. travel cardinally while the projectile remains inside its room and the
+   decoded terrain sample is passable;
+3. on terrain or player impact, disable further contact, reverse the angle,
+   use `SPEED_40` (0.25 pixels per tick), and start vertical speed `-$e0`;
+4. apply gravity `$0e` and release the part slot after counter `$20`.
+
+The diagnostic presentation keeps the projectile's ground anchor for ordering,
+renders its airborne height independently, and leaves the shadow at ground
+level. Player contact applies the decoded four-unit damage through the same
+60-tick invincibility gate as enemy contact.
+
 ## Verification
 
 The headless dual-ROM tests assert:
@@ -123,14 +158,18 @@ The headless dual-ROM tests assert:
 - both developer rooms contain a positioned red Octorok;
 - contact damage is invulnerability-gated and does not enter the actor solid
   collision snapshot;
+- projectile attributes and nonempty 16x16 OAM decode identically from both
+  campaign relocations;
+- shooting requests allocate part slots, terrain produces the impact and
+  reverse-bounce states, and the 32-tick lifetime releases the slot;
+- projectile contact removes four health units and remains separate from
+  solid NPC collision;
 - two separate sword presses produce hit then defeat;
 - identical seeds and tick sequences reproduce native runtime state;
 - both campaigns traverse the same shared behavior state.
 
 ## Next boundary
 
-Allocate `PART_OCTOROK_PROJECTILE` from each emitted request, decode its
-cartridge attributes/OAM, implement travel, wall impact, and player damage,
-then replace the diagnostic sword rectangle with the original item-state and
-OAM path. Random-position enemy records and enemy drops should follow those
-two representative actor paths.
+Replace the diagnostic sword rectangle with the original parent-item state,
+animation, and OAM path. Random-position enemy records and enemy drops should
+follow the completed enemy/part paths and the representative sword item path.
