@@ -47,7 +47,7 @@ std::optional<core::ActorSlotHandle> InteractionTargetFinder::find(
             break;
         }
         if (
-            forward < 0.0 ||
+            forward <= 0.0 ||
             forward > maximum_forward_distance ||
             std::abs(lateral) > maximum_lateral_distance) {
             continue;

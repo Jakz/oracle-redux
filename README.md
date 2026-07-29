@@ -124,7 +124,8 @@ The scaffold currently contains:
 - a dual-campaign Vasu developer scenario with ROM-decoded Vasu/snakes OAM,
   recursive text dictionaries, semantic dialogue pages/options, a bounded
   native interpreter for the relocated retail Vasu scripts, typed Original
-  State Keys, source-coordinate traces, and replayed interaction input;
+  State Keys, source-coordinate traces, script-derived NPC collision and wall
+  slide, and replayed interaction input;
 - live ROM tile-warp and vertical screen-edge execution with destination-group
   loading, transition-aware placement, and warp re-entry suppression;
 - all 256 small rooms in world groups 0–3, with full-resolution atlas export;

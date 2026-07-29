@@ -47,6 +47,9 @@ struct ActorSlotState {
     bool active{};
     bool positioned{};
     bool conditional{};
+    std::uint8_t collision_radius_y{};
+    std::uint8_t collision_radius_x{};
+    bool blocks_player{};
 };
 
 // Mirrors the four $dx00-$dxff Game Boy object bands. Every band has 16

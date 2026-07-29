@@ -58,6 +58,9 @@ std::optional<ActorSlotHandle> ActorSlotDomain::allocate_dynamic(
         state.active = true;
         state.positioned = positioned;
         state.conditional = conditional;
+        state.collision_radius_y = 0;
+        state.collision_radius_x = 0;
+        state.blocks_player = false;
         return ActorSlotHandle{
             category,
             slot,
@@ -86,6 +89,11 @@ std::optional<ActorSlotHandle> ActorSlotDomain::allocate_at(
     state.identity = identity;
     state.room = room;
     state.active = true;
+    state.positioned = false;
+    state.conditional = false;
+    state.collision_radius_y = 0;
+    state.collision_radius_x = 0;
+    state.blocks_player = false;
     return ActorSlotHandle{
         category,
         slot,

@@ -125,8 +125,14 @@ retains the original source coordinates and scheduling outcomes.
 
 Coverage is intentionally fail-closed: only opcodes and the two helper targets
 reached by this route are registered. The first-visit ring tutorial, ring-list
-state, broad script coverage, and NPC solid-body collision remain outside this
-slice.
+state, and broad script coverage remain outside this slice.
+
+Opcode `0x8d` also feeds the authoritative actor slot with Vasu's original
+Y=`$12`, X=`$06` collision radii. Link uses his original 6-by-6 actor radii;
+overlaps resolve on the shallower axis and movement slides along the remaining
+axis. This is independent of the smaller tile-collision foot box and all
+rendering geometry. See
+[`actor-collision.md`](actor-collision.md).
 
 ## Developer scenario
 

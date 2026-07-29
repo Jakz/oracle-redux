@@ -1861,6 +1861,9 @@ int run_window(
                     input_frame,
                     current_player,
                     current_actors);
+                const auto actor_collision_bodies =
+                    oracle::gameplay::collect_actor_collision_bodies(
+                        current_actors);
                 const auto traversal =
                     oracle::gameplay::PlayerTraversal::step(
                         current_player,
@@ -1875,7 +1878,8 @@ int run_window(
                                 : vertical,
                         },
                         logic_step,
-                        collision_lookup);
+                        collision_lookup,
+                        actor_collision_bodies.bodies());
                 player_moving = traversal.moved;
                 if (traversal.crossed_room_seam) {
                     reload_current_objects();

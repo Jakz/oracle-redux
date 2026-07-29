@@ -61,6 +61,7 @@ target_compile_features(oracle_script PUBLIC cxx_std_20)
 target_link_libraries(oracle_script PUBLIC oracle_content oracle_input)
 
 add_library(oracle_gameplay
+    src/gameplay/actor_collision.cpp
     src/gameplay/interaction_target.cpp
     src/gameplay/player_traversal.cpp
     src/gameplay/room_actor_loader.cpp
@@ -156,4 +157,8 @@ if(ORACLE_BUILD_TESTS)
         target_compile_options(oracle_core_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME oracle_core_tests COMMAND oracle_core_tests)
+    set_tests_properties(
+        oracle_core_tests
+        PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
 endif()

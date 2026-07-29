@@ -46,9 +46,9 @@ The documented post-ring-box, no-rings branch now runs from the original
 relocated Vasu bytecode in both cartridges. The bounded Native Script Runtime,
 validated Original State Keys, campaign-specific host registry, option labels,
 and source-coordinate execution traces are implemented. Headless replay proves
-that Ages and Seasons execute the same normalized instruction path. NPC
-solid-body collision is the remaining acceptance item before this immediate
-slice is complete. See
+that Ages and Seasons execute the same normalized instruction path. Script-set
+NPC collision radii, retail overlap separation, and axis-preserving wall slide
+now complete the immediate slice. See
 [`../reverse-engineering/vasu-interaction-slice.md`](../reverse-engineering/vasu-interaction-slice.md).
 
 ### Scope
@@ -95,10 +95,10 @@ sprite composition, anchors, ordering, and presentation snapshots.
 
 ### Next implementation boundary
 
-Add actor collision bodies derived from the decoded interaction radii and
-integrate them with player wall sliding without changing room-tile collision.
-Exercise this in both Vasu rooms and add headless contact tests. Once that
-closes the immediate slice, begin the representative combat and item loop.
+Begin the representative combat and item loop with one shared enemy family.
+Preserve original actor allocation/update order, separate contact damage from
+solid-body collision, and feed the existing item primitives through semantic
+input and deterministic traces.
 
 ## Following slices
 

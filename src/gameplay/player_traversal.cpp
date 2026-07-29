@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <span>
 #include <stdexcept>
 
 #include "oracle/content/room_layout.h"
@@ -24,6 +25,75 @@ bool same_room(
     const core::WorldRoomId left,
     const core::WorldRoomId right) noexcept {
     return left == right;
+}
+
+bool shares_actor_space(
+    const core::WorldRoomId player_room,
+    const core::WorldRoomId actor_room) noexcept {
+    if (player_room.area != actor_room.area) {
+        return false;
+    }
+    return
+        player_room.area < 4 ||
+        player_room.room == actor_room.room;
+}
+
+double room_world_x(
+    const core::WorldRoomId room,
+    const double local_x) noexcept {
+    if (room.area >= 4) {
+        return local_x;
+    }
+    return
+        static_cast<double>(room.room & 0x0f) *
+            content::small_room_world_width +
+        local_x;
+}
+
+double room_world_y(
+    const core::WorldRoomId room,
+    const double local_y) noexcept {
+    if (room.area >= 4) {
+        return local_y;
+    }
+    return
+        static_cast<double>((room.room >> 4u) & 0x0f) *
+            content::small_room_world_height +
+        local_y;
+}
+
+bool overlaps_actor(
+    const PlayerState& player,
+    const ActorCollisionBody& actor,
+    const PlayerBody body) noexcept {
+    if (!shares_actor_space(player.room, actor.room)) {
+        return false;
+    }
+    const auto delta_x = std::abs(
+        room_world_x(player.room, player.local_x) -
+        room_world_x(actor.room, actor.local_x));
+    const auto delta_y = std::abs(
+        room_world_y(player.room, player.local_y) -
+        room_world_y(actor.room, actor.local_y));
+    return
+        delta_x <
+            body.actor_collision_radius_x +
+                static_cast<double>(actor.radius_x) &&
+        delta_y <
+            body.actor_collision_radius_y +
+                static_cast<double>(actor.radius_y);
+}
+
+bool overlaps_any_actor(
+    const PlayerState& player,
+    const std::span<const ActorCollisionBody> actors,
+    const PlayerBody body) noexcept {
+    return std::any_of(
+        actors.begin(),
+        actors.end(),
+        [&](const ActorCollisionBody& actor) {
+            return overlaps_actor(player, actor, body);
+        });
 }
 
 bool resolve_small_room_sample(CollisionSample& sample) {
@@ -143,12 +213,63 @@ void canonicalize_player(PlayerState& player) {
     player.room.room = room;
 }
 
+bool resolve_actor_overlaps(
+    PlayerState& player,
+    const std::span<const ActorCollisionBody> actors,
+    const PlayerBody body) {
+    bool contacted{};
+    for (const auto& actor : actors) {
+        if (!overlaps_actor(player, actor, body)) {
+            continue;
+        }
+        const auto player_x =
+            room_world_x(player.room, player.local_x);
+        const auto player_y =
+            room_world_y(player.room, player.local_y);
+        const auto actor_x =
+            room_world_x(actor.room, actor.local_x);
+        const auto actor_y =
+            room_world_y(actor.room, actor.local_y);
+        const auto delta_x = player_x - actor_x;
+        const auto delta_y = player_y - actor_y;
+        const auto combined_x =
+            body.actor_collision_radius_x +
+            static_cast<double>(actor.radius_x);
+        const auto combined_y =
+            body.actor_collision_radius_y +
+            static_cast<double>(actor.radius_y);
+        const auto penetration_x =
+            combined_x - std::abs(delta_x);
+        const auto penetration_y =
+            combined_y - std::abs(delta_y);
+
+        // The retail preventObjectHFromPassingObjectD routine resolves the
+        // shallower axis. Equal penetration resolves horizontally.
+        if (penetration_y < penetration_x) {
+            player.local_y +=
+                actor_y +
+                    (delta_y > 0.0 ? combined_y : -combined_y) -
+                player_y;
+        } else {
+            player.local_x +=
+                actor_x +
+                    (delta_x > 0.0 ? combined_x : -combined_x) -
+                player_x;
+        }
+        canonicalize_player(player);
+        contacted = true;
+    }
+    return contacted;
+}
+
 bool move_axis(
     PlayerState& player,
     const double amount,
     const bool horizontal,
     const CollisionLookup& collision_lookup,
-    const PlayerBody body) {
+    const std::span<const ActorCollisionBody> actor_bodies,
+    const PlayerBody body,
+    bool& contacted_actor) {
     if (amount == 0.0) {
         return false;
     }
@@ -161,7 +282,11 @@ bool move_axis(
     if (!PlayerTraversal::can_occupy(
             candidate,
             collision_lookup,
+            actor_bodies,
             body)) {
+        contacted_actor =
+            contacted_actor ||
+            overlaps_any_actor(candidate, actor_bodies, body);
         return false;
     }
     player = candidate;
@@ -176,13 +301,16 @@ TraversalStep PlayerTraversal::step(
     MovementInput input,
     const double elapsed_seconds,
     const CollisionLookup& collision_lookup,
+    const std::span<const ActorCollisionBody> actor_bodies,
     const double speed_pixels_per_second,
     const PlayerBody body) {
     if (
         elapsed_seconds < 0.0 ||
         speed_pixels_per_second < 0.0 ||
         body.half_width <= 0.0 ||
-        body.half_height <= 0.0) {
+        body.half_height <= 0.0 ||
+        body.actor_collision_radius_x <= 0.0 ||
+        body.actor_collision_radius_y <= 0.0) {
         throw std::invalid_argument{
             "player traversal parameters must be non-negative"};
     }
@@ -208,6 +336,10 @@ TraversalStep PlayerTraversal::step(
     }
 
     TraversalStep result{.previous_room = player.room};
+    result.contacted_actor =
+        resolve_actor_overlaps(player, actor_bodies, body);
+    result.moved = result.contacted_actor;
+    result.blocked = result.contacted_actor;
     const auto distance = speed_pixels_per_second * elapsed_seconds;
     const auto substeps = std::max(
         1,
@@ -224,14 +356,18 @@ TraversalStep PlayerTraversal::step(
                 horizontal_step,
                 true,
                 collision_lookup,
-                body);
+                actor_bodies,
+                body,
+                result.contacted_actor);
         const auto moved_vertical =
             move_axis(
                 player,
                 vertical_step,
                 false,
                 collision_lookup,
-                body);
+                actor_bodies,
+                body,
+                result.contacted_actor);
         result.moved =
             result.moved || moved_horizontal || moved_vertical;
         result.blocked =
@@ -247,6 +383,7 @@ TraversalStep PlayerTraversal::step(
 bool PlayerTraversal::can_occupy(
     const PlayerState& player,
     const CollisionLookup& collision_lookup,
+    const std::span<const ActorCollisionBody> actor_bodies,
     const PlayerBody body) {
     const std::array<CollisionSample, 8> samples{
         CollisionSample{
@@ -290,12 +427,14 @@ bool PlayerTraversal::can_occupy(
             player.local_y + body.half_height - collision_epsilon,
         },
     };
-    return std::all_of(
-        samples.begin(),
-        samples.end(),
-        [&](const CollisionSample sample) {
-            return sample_is_clear(sample, collision_lookup);
-        });
+    return
+        std::all_of(
+            samples.begin(),
+            samples.end(),
+            [&](const CollisionSample sample) {
+                return sample_is_clear(sample, collision_lookup);
+            }) &&
+        !overlaps_any_actor(player, actor_bodies, body);
 }
 
 bool PlayerTraversal::place_near(
@@ -303,6 +442,7 @@ bool PlayerTraversal::place_near(
     const double preferred_x,
     const double preferred_y,
     const CollisionLookup& collision_lookup,
+    const std::span<const ActorCollisionBody> actor_bodies,
     const PlayerBody body) {
     constexpr int search_step = 4;
     constexpr int maximum_radius = 160;
@@ -318,7 +458,11 @@ bool PlayerTraversal::place_near(
                 auto candidate = player;
                 candidate.local_x = preferred_x + x;
                 candidate.local_y = preferred_y + y;
-                if (can_occupy(candidate, collision_lookup, body)) {
+                if (can_occupy(
+                        candidate,
+                        collision_lookup,
+                        actor_bodies,
+                        body)) {
                     player = candidate;
                     canonicalize_player(player);
                     return true;

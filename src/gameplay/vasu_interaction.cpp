@@ -31,7 +31,7 @@ VasuInteractionRuntime::VasuInteractionRuntime(
 void VasuInteractionRuntime::update(
     const input::InputFrame& input,
     const PlayerState& player,
-    const core::ActorSlotDomain& actors) {
+    core::ActorSlotDomain& actors) {
     if (!actor_.has_value() || actors.get(*actor_) == nullptr) {
         actor_.reset();
         const auto slots =
@@ -63,8 +63,20 @@ void VasuInteractionRuntime::update(
             0x30);
     }
 
+    const auto* active_instance = script_.instance();
+    const auto lateral_distance =
+        active_instance == nullptr ||
+            active_instance->collision_radius_x == 0
+        ? 10.0
+        : PlayerBody{}.actor_collision_radius_x +
+            static_cast<double>(
+                active_instance->collision_radius_x);
     const auto target =
-        InteractionTargetFinder::find(player, actors);
+        InteractionTargetFinder::find(
+            player,
+            actors,
+            24.0,
+            lateral_distance);
     const bool received_a =
         target.has_value() &&
         *target == *actor_ &&
@@ -72,6 +84,16 @@ void VasuInteractionRuntime::update(
             input.pressed(input::InputAction::a) ||
             input.pressed(input::InputAction::confirm));
     script_.tick(input, received_a);
+
+    auto* actor = actors.get(*actor_);
+    const auto* instance = script_.instance();
+    if (actor != nullptr && instance != nullptr) {
+        actor->collision_radius_y = instance->collision_radius_y;
+        actor->collision_radius_x = instance->collision_radius_x;
+        actor->blocks_player =
+            actor->collision_radius_y != 0 &&
+            actor->collision_radius_x != 0;
+    }
 }
 
 bool VasuInteractionRuntime::captures_input() const noexcept {

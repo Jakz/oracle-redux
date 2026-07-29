@@ -1,9 +1,11 @@
 #pragma once
 
 #include <functional>
+#include <span>
 
 #include "oracle/content/room_collisions.h"
 #include "oracle/core/world_id.h"
+#include "oracle/gameplay/actor_collision.h"
 
 namespace oracle::gameplay {
 
@@ -17,6 +19,8 @@ enum class PlayerFacing {
 struct PlayerBody {
     double half_width{4.0};
     double half_height{3.0};
+    double actor_collision_radius_x{6.0};
+    double actor_collision_radius_y{6.0};
 };
 
 struct PlayerState {
@@ -36,6 +40,7 @@ struct TraversalStep {
     bool moved{};
     bool crossed_room_seam{};
     bool blocked{};
+    bool contacted_actor{};
 };
 
 using CollisionLookup = std::function<
@@ -48,12 +53,14 @@ public:
         MovementInput input,
         double elapsed_seconds,
         const CollisionLookup& collision_lookup,
+        std::span<const ActorCollisionBody> actor_bodies = {},
         double speed_pixels_per_second = 64.0,
         PlayerBody body = {});
 
     [[nodiscard]] static bool can_occupy(
         const PlayerState& player,
         const CollisionLookup& collision_lookup,
+        std::span<const ActorCollisionBody> actor_bodies = {},
         PlayerBody body = {});
 
     [[nodiscard]] static bool place_near(
@@ -61,6 +68,7 @@ public:
         double preferred_x,
         double preferred_y,
         const CollisionLookup& collision_lookup,
+        std::span<const ActorCollisionBody> actor_bodies = {},
         PlayerBody body = {});
 
     [[nodiscard]] static double world_x(const PlayerState& player) noexcept;

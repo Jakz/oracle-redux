@@ -21,6 +21,7 @@
 #include "oracle/content/room_pixels.h"
 #include "oracle/content/room_topology.h"
 #include "oracle/experience_settings.h"
+#include "oracle/gameplay/actor_collision.h"
 #include "oracle/gameplay/interaction_target.h"
 #include "oracle/gameplay/player_traversal.h"
 #include "oracle/gameplay/room_actor_loader.h"
@@ -139,6 +140,15 @@ void test_actor_slot_domain() {
         "dynamic items retain the original d7-db allocation range");
 
     const auto stale = *interaction;
+    auto* interaction_state = actors.get(stale);
+    check(
+        interaction_state != nullptr,
+        "allocated actor handle resolves before release");
+    if (interaction_state != nullptr) {
+        interaction_state->collision_radius_y = 18;
+        interaction_state->collision_radius_x = 6;
+        interaction_state->blocks_player = true;
+    }
     check(actors.release(stale), "active actor slot releases");
     const auto replacement = actors.allocate_dynamic(
         ActorCategory::interaction,
@@ -155,6 +165,13 @@ void test_actor_slot_domain() {
             replacement->generation != stale.generation &&
             actors.get(stale) == nullptr,
         "slot generations reject stale actor handles");
+    const auto* replacement_state = actors.get(*replacement);
+    check(
+        replacement_state != nullptr &&
+            replacement_state->collision_radius_y == 0 &&
+            replacement_state->collision_radius_x == 0 &&
+            !replacement_state->blocks_player,
+        "reused actor slots clear authoritative collision state");
 }
 
 std::vector<std::uint8_t> test_vasu_rom_scenario(
@@ -173,6 +190,7 @@ std::vector<std::uint8_t> test_vasu_rom_scenario(
     using oracle::gameplay::PlayerTraversal;
     using oracle::gameplay::RoomActorLoader;
     using oracle::gameplay::VasuInteractionRuntime;
+    using oracle::gameplay::collect_actor_collision_bodies;
     using oracle::input::InputAction;
     using oracle::script::CampaignScriptProfile;
     using oracle::script::OriginalActorField;
@@ -241,6 +259,47 @@ std::vector<std::uint8_t> test_vasu_rom_scenario(
         pressed_frame(InputAction::a),
         player,
         actors);
+    const auto collision_bodies =
+        collect_actor_collision_bodies(actors);
+    check(
+        collision_bodies.size() == 1 &&
+            collision_bodies.front().radius_y == 0x12 &&
+            collision_bodies.front().radius_x == 0x06,
+        "Vasu collision radii come from retail opcode 8d");
+    oracle::content::RoomCollisionMap clear_room{
+        .id = scenario.room,
+        .columns = 10,
+        .rows = 8,
+        .values = std::vector<std::uint8_t>(80, 0),
+    };
+    const auto clear_lookup =
+        [&](const oracle::core::WorldRoomId id)
+            -> const oracle::content::RoomCollisionMap* {
+            return id == clear_room.id ? &clear_room : nullptr;
+        };
+    auto collision_player = player;
+    const auto contact = PlayerTraversal::step(
+        collision_player,
+        {},
+        0.0,
+        clear_lookup,
+        collision_bodies.bodies());
+    check(
+        contact.contacted_actor && contact.blocked,
+        "Vasu resolves an existing Link overlap");
+    check_close(
+        std::abs(
+            collision_player.local_x -
+            collision_bodies.front().local_x),
+        12.0,
+        "Vasu contact uses both original X collision radii");
+    check(
+        oracle::gameplay::InteractionTargetFinder::find(
+            collision_player,
+            actors,
+            24.0,
+            12.0) == collision_bodies.front().actor,
+        "Link can still address Vasu from the collision boundary");
     runtime.update(
         pressed_frame(InputAction::a),
         player,
@@ -821,6 +880,7 @@ void test_player_traversal() {
     using oracle::content::RoomCollisionMap;
     using oracle::core::WorldRoomId;
     using oracle::gameplay::MovementInput;
+    using oracle::gameplay::ActorCollisionBody;
     using oracle::gameplay::PlayerState;
     using oracle::gameplay::PlayerTraversal;
 
@@ -901,6 +961,101 @@ void test_player_traversal() {
     check(
         player.local_x < 28.1,
         "substepped traversal cannot tunnel through a solid metatile");
+
+    const std::array actor_bodies{
+        ActorCollisionBody{
+            .room = WorldRoomId{.area = 0, .room = 0x91},
+            .local_x = 64.0,
+            .local_y = 64.0,
+            .radius_y = 18,
+            .radius_x = 6,
+        },
+    };
+    player =
+        PlayerState{
+            .room = WorldRoomId{.area = 0, .room = 0x91},
+            .local_x = 60.0,
+            .local_y = 60.0,
+        };
+    const auto overlap_step =
+        PlayerTraversal::step(
+            player,
+            {},
+            0.0,
+            lookup,
+            actor_bodies);
+    check(
+        overlap_step.contacted_actor &&
+            overlap_step.blocked &&
+            overlap_step.moved,
+        "actor contact reports deterministic overlap correction");
+    check_close(
+        player.local_x,
+        52.0,
+        "shallower horizontal actor overlap resolves first");
+    check_close(
+        player.local_y,
+        60.0,
+        "actor overlap leaves the non-resolved axis unchanged");
+
+    player =
+        PlayerState{
+            .room = WorldRoomId{.area = 0, .room = 0x91},
+            .local_x = 52.0,
+            .local_y = 52.0,
+        };
+    const auto actor_slide =
+        PlayerTraversal::step(
+            player,
+            MovementInput{
+                .horizontal = 1.0,
+                .vertical = 1.0,
+            },
+            0.25,
+            lookup,
+            actor_bodies);
+    check(
+        actor_slide.contacted_actor &&
+            actor_slide.blocked &&
+            actor_slide.moved,
+        "diagonal movement reports actor contact while sliding");
+    check_close(
+        player.local_x,
+        52.0,
+        "actor body blocks the penetrating movement axis");
+    check(
+        player.local_y > 52.0,
+        "unblocked movement axis slides along the actor body");
+
+    maps[1].values[4 * 10] = 0;
+    const std::array adjacent_actor{
+        ActorCollisionBody{
+            .room = WorldRoomId{.area = 0, .room = 0x92},
+            .local_x = 6.0,
+            .local_y = 64.0,
+            .radius_y = 6,
+            .radius_x = 6,
+        },
+    };
+    player =
+        PlayerState{
+            .room = WorldRoomId{.area = 0, .room = 0x91},
+            .local_x = 152.0,
+            .local_y = 64.0,
+        };
+    const auto adjacent_contact =
+        PlayerTraversal::step(
+            player,
+            MovementInput{.horizontal = 1.0},
+            0.2,
+            lookup,
+            adjacent_actor);
+    check(
+        adjacent_contact.contacted_actor &&
+            adjacent_contact.blocked &&
+            player.room.room == 0x91 &&
+            player.local_x <= 154.0,
+        "actor bodies block movement across a small-room seam");
 
     const auto packed =
         PlayerTraversal::from_packed_room_position(

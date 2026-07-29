@@ -31,7 +31,7 @@ public:
     void update(
         const input::InputFrame& input,
         const PlayerState& player,
-        const core::ActorSlotDomain& actors);
+        core::ActorSlotDomain& actors);
 
     [[nodiscard]] bool captures_input() const noexcept;
     [[nodiscard]] ui::DialogueModel model() const;
