@@ -126,6 +126,10 @@ The scaffold currently contains:
   native interpreter for the relocated retail Vasu scripts, typed Original
   State Keys, source-coordinate traces, script-derived NPC collision and wall
   slide, and replayed interaction input;
+- a shared native Octorok combat path with cartridge-decoded enemy properties,
+  compression mode, directional OAM, authentic sprite pixels, original RNG
+  and action counters, non-solid contact damage, damage invincibility, and a
+  deterministic two-hit diagnostic sword/defeat loop;
 - live ROM tile-warp and vertical screen-edge execution with destination-group
   loading, transition-aware placement, and warp re-entry suppression;
 - all 256 small rooms in world groups 0–3, with full-resolution atlas export;
@@ -153,7 +157,7 @@ Controls:
 
 - in normal launch mode, `WASD` or arrow keys move Link;
 - `Z` or Enter interacts and advances dialogue; directions choose a dialogue
-  option; `X` or Backspace cancels;
+  option; `X` attacks outside dialogue and cancels inside dialogue;
 - in `--atlas` mode, `WASD` or arrow keys pan the camera;
 - the mouse wheel zooms between overview and close-up scales;
 - `R` resets the camera;
@@ -172,6 +176,17 @@ build/oracle_room_slice path/to/oracle.gbc --vasu-scenario
 
 The scenario and current fidelity boundary are documented in
 [`docs/reverse-engineering/vasu-interaction-slice.md`](docs/reverse-engineering/vasu-interaction-slice.md).
+
+Launch the first shared enemy/combat scenario. The runtime chooses a real
+positioned Octorok room for either campaign:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc --octorok-scenario
+```
+
+Use `X` for the provisional semantic sword strike. The decoded enemy path,
+exact/provisional boundary, and next projectile step are documented in
+[`docs/reverse-engineering/octorok-combat-slice.md`](docs/reverse-engineering/octorok-combat-slice.md).
 
 Choose another room by its hexadecimal overworld coordinate:
 

@@ -28,7 +28,7 @@ diagnostic renderer first
 direct SDL GPU production renderer later
 ```
 
-## Immediate next slice: deterministic actor interaction
+## Completed slice: deterministic actor interaction
 
 The next implementation slice should make one ROM-defined interaction playable
 in each campaign while using the current diagnostic renderer.
@@ -81,9 +81,9 @@ now complete the immediate slice. See
 - CMake and `projects/msvc/oracle-redux.sln` build the slice and its tests.
 - Public C++ headers use `.h`.
 
-### Explicitly deferred
+### Explicitly deferred from that stage
 
-- enemies, combat, inventory breadth, and persistent pickups;
+- inventory breadth and persistent pickups;
 - music and sound-effect output;
 - Original Save Image import/export;
 - direct SDL GPU production rendering and 2.5D effects;
@@ -93,12 +93,24 @@ This is intentionally a runtime slice, not an engine-framework rewrite. The
 current viewer remains useful until gameplay interactions can validate correct
 sprite composition, anchors, ordering, and presentation snapshots.
 
+### Combat checkpoint
+
+The first representative combat checkpoint now selects the shared Octorok
+family in Ages `00:64` and Seasons `00:a6`. It decodes the relocated
+`enemyData`, subid, `extraEnemyData`, object graphics header, graphics, palette,
+animation, and OAM tables. The native runtime preserves the shared retail RNG,
+states `$08-$0b`, counters, cardinal subpixel speed, contact radius, damage,
+health, and deterministic replay. Enemy contact is explicitly separate from
+solid NPC collision. Semantic action B supplies a visible provisional
+two-strike defeat loop. See
+[`../reverse-engineering/octorok-combat-slice.md`](../reverse-engineering/octorok-combat-slice.md).
+
 ### Next implementation boundary
 
-Begin the representative combat and item loop with one shared enemy family.
-Preserve original actor allocation/update order, separate contact damage from
-solid-body collision, and feed the existing item primitives through semantic
-input and deterministic traces.
+Allocate and simulate the requested Octorok projectile part, including ROM
+attributes/OAM, terrain impact, and player damage. Then replace the diagnostic
+sword hitbox with the original sword item state and OAM path before broadening
+to random-position enemy records, drops, or another family.
 
 ## Following slices
 

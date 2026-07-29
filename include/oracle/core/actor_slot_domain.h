@@ -49,6 +49,9 @@ struct ActorSlotState {
     bool conditional{};
     std::uint8_t collision_radius_y{};
     std::uint8_t collision_radius_x{};
+    std::uint8_t maximum_health{};
+    std::uint8_t health{};
+    std::int8_t contact_damage{};
     bool blocks_player{};
 };
 

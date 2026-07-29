@@ -4,12 +4,15 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "oracle/content/interaction_sprite.h"
+#include "oracle/content/enemy_data.h"
+#include "oracle/content/enemy_sprite.h"
 #include "oracle/content/rom_source.h"
 #include "oracle/content/rom_text.h"
 #include "oracle/content/room_objects.h"
@@ -23,6 +26,7 @@
 #include "oracle/experience_settings.h"
 #include "oracle/gameplay/actor_collision.h"
 #include "oracle/gameplay/interaction_target.h"
+#include "oracle/gameplay/octorok_runtime.h"
 #include "oracle/gameplay/player_traversal.h"
 #include "oracle/gameplay/room_actor_loader.h"
 #include "oracle/gameplay/vasu_interaction.h"
@@ -170,8 +174,11 @@ void test_actor_slot_domain() {
         replacement_state != nullptr &&
             replacement_state->collision_radius_y == 0 &&
             replacement_state->collision_radius_x == 0 &&
+            replacement_state->maximum_health == 0 &&
+            replacement_state->health == 0 &&
+            replacement_state->contact_damage == 0 &&
             !replacement_state->blocks_player,
-        "reused actor slots clear authoritative collision state");
+        "reused actor slots clear authoritative collision and combat state");
 }
 
 std::vector<std::uint8_t> test_vasu_rom_scenario(
@@ -431,6 +438,245 @@ void test_vasu_rom_scenarios() {
         check(
             ages == seasons,
             "both relocated Vasu scripts share one native opcode path");
+    }
+}
+
+std::optional<std::uint64_t> test_octorok_rom_scenario(
+    const std::filesystem::path& path,
+    const oracle::core::Campaign campaign) {
+    if (!std::filesystem::exists(path)) {
+        return std::nullopt;
+    }
+    using oracle::content::EnemyDefinitionDecoder;
+    using oracle::content::EnemySpriteDecoder;
+    using oracle::content::RomSource;
+    using oracle::content::RoomObjectDecoder;
+    using oracle::core::ActorCategory;
+    using oracle::core::ActorSlotDomain;
+    using oracle::gameplay::OctorokRuntime;
+    using oracle::gameplay::PlayerCombatState;
+    using oracle::gameplay::PlayerFacing;
+    using oracle::gameplay::PlayerState;
+    using oracle::gameplay::RoomActorLoader;
+    using oracle::input::InputAction;
+
+    const auto rom = RomSource::load(path);
+    const auto definition =
+        EnemyDefinitionDecoder{rom}.decode(0x09, 0);
+    check(
+        definition.object_gfx_header ==
+            (campaign == oracle::core::Campaign::ages
+                 ? 0x8f
+                 : 0x74),
+        "Octorok uses the campaign-relocated object graphics header");
+    check(
+        definition.collision_enabled &&
+            definition.collision_mode == 0x10 &&
+            definition.extra_data_index == 0x08 &&
+            definition.collision_radius_y == 6 &&
+            definition.collision_radius_x == 6 &&
+            definition.contact_damage == -2 &&
+            definition.health == 2 &&
+            definition.palette == 2 &&
+            definition.tile_base == 0,
+        "Octorok properties decode from enemyData and extraEnemyData");
+
+    const auto sprite =
+        EnemySpriteDecoder{rom}.decode_octorok(0, 0);
+    check(
+        sprite.original_oam_index == 0 &&
+            sprite.width == 16 &&
+            sprite.height == 16 &&
+            sprite.origin_x == -8 &&
+            sprite.origin_y == 8,
+        "Octorok north frame follows original OAM and hardware origins");
+    check(
+        std::any_of(
+            sprite.pixels.begin(),
+            sprite.pixels.end(),
+            [](const oracle::content::RgbaPixel pixel) {
+                return pixel.alpha != 0;
+            }),
+        "Octorok frame contains authentic decoded ROM pixels");
+
+    const auto scenario =
+        oracle::gameplay::octorok_scenario(campaign);
+    const auto catalog = RoomObjectDecoder{rom}.decode(
+        static_cast<std::uint8_t>(scenario.room.area),
+        static_cast<std::uint8_t>(scenario.room.room));
+    ActorSlotDomain actors;
+    const auto load_report = RoomActorLoader::load(catalog, actors);
+    check(
+        load_report.failures.empty(),
+        "Octorok scenario records fit the retail enemy slots");
+    const auto enemy_slots = actors.slots(ActorCategory::enemy);
+    const auto octorok = std::find_if(
+        enemy_slots.begin(),
+        enemy_slots.end(),
+        [](const oracle::core::ActorSlotState& actor) {
+            return
+                actor.active &&
+                actor.positioned &&
+                actor.identity.id == 0x09 &&
+                actor.identity.subid == 0;
+        });
+    check(
+        octorok != enemy_slots.end(),
+        "Octorok scenario selects a positioned retail room record");
+    if (octorok == enemy_slots.end()) {
+        return std::nullopt;
+    }
+
+    oracle::content::RoomCollisionMap clear_room{
+        .id = scenario.room,
+        .columns = 10,
+        .rows = 8,
+        .values = std::vector<std::uint8_t>(80, 0),
+    };
+    const auto collision_lookup =
+        [&](const oracle::core::WorldRoomId id)
+            -> const oracle::content::RoomCollisionMap* {
+            return id == clear_room.id ? &clear_room : nullptr;
+        };
+    auto player = PlayerState{
+        .room = scenario.room,
+        .local_x = static_cast<double>(octorok->local_x),
+        .local_y = static_cast<double>(octorok->local_y),
+        .facing = PlayerFacing::south,
+    };
+    PlayerCombatState combat;
+    OctorokRuntime runtime{rom, 0x5a17};
+    const auto contact = runtime.update(
+        {},
+        player,
+        combat,
+        actors,
+        collision_lookup);
+    check(
+        contact.contacts == 1 &&
+            combat.health == 10 &&
+            combat.invincibility_ticks != 0,
+        "Octorok contact applies the ROM's two health-unit damage");
+    const auto contact_again = runtime.update(
+        {},
+        player,
+        combat,
+        actors,
+        collision_lookup);
+    check(
+        contact_again.contacts == 0 && combat.health == 10,
+        "player damage invincibility suppresses repeated contact damage");
+    check(
+        oracle::gameplay::collect_actor_collision_bodies(actors).size() == 0,
+        "enemy contact remains separate from solid NPC collision");
+
+    const auto locate_octorok = [&]()
+        -> const oracle::core::ActorSlotState* {
+        const auto slots = actors.slots(ActorCategory::enemy);
+        const auto found = std::find_if(
+            slots.begin(),
+            slots.end(),
+            [](const oracle::core::ActorSlotState& actor) {
+                return actor.active && actor.identity.id == 0x09;
+            });
+        return found == slots.end() ? nullptr : &*found;
+    };
+    auto* active_octorok = locate_octorok();
+    check(active_octorok != nullptr, "Octorok survives one contact update");
+    if (active_octorok == nullptr) {
+        return std::nullopt;
+    }
+    player.local_x = active_octorok->local_x;
+    player.local_y = active_octorok->local_y + 12.0;
+    player.facing = PlayerFacing::north;
+    const auto first_strike = runtime.update(
+        pressed_frame(InputAction::b),
+        player,
+        combat,
+        actors,
+        collision_lookup);
+    active_octorok = locate_octorok();
+    check(
+        first_strike.sword_started &&
+            first_strike.enemies_hit == 1 &&
+            first_strike.enemies_defeated == 0 &&
+            active_octorok != nullptr &&
+            active_octorok->health == 1,
+        "first semantic sword strike removes one Octorok health unit");
+    for (int tick = 0; tick < 13; ++tick) {
+        (void)runtime.update(
+            {},
+            player,
+            combat,
+            actors,
+            collision_lookup);
+    }
+    active_octorok = locate_octorok();
+    if (active_octorok != nullptr) {
+        player.local_x = active_octorok->local_x;
+        player.local_y = active_octorok->local_y + 12.0;
+    }
+    const auto second_strike = runtime.update(
+        pressed_frame(InputAction::b),
+        player,
+        combat,
+        actors,
+        collision_lookup);
+    check(
+        second_strike.enemies_hit == 1 &&
+            second_strike.enemies_defeated == 1 &&
+            locate_octorok() == nullptr,
+        "second semantic sword strike releases the defeated enemy slot");
+
+    ActorSlotDomain replay_actors;
+    (void)RoomActorLoader::load(catalog, replay_actors);
+    OctorokRuntime replay{rom, 0x5a17};
+    PlayerCombatState replay_combat;
+    auto replay_player = PlayerState{
+        .room = scenario.room,
+        .local_x = 8.0,
+        .local_y = 8.0,
+    };
+    for (int tick = 0; tick < 180; ++tick) {
+        (void)replay.update(
+            {},
+            replay_player,
+            replay_combat,
+            replay_actors,
+            collision_lookup);
+    }
+
+    ActorSlotDomain second_replay_actors;
+    (void)RoomActorLoader::load(catalog, second_replay_actors);
+    OctorokRuntime second_replay{rom, 0x5a17};
+    PlayerCombatState second_replay_combat;
+    for (int tick = 0; tick < 180; ++tick) {
+        (void)second_replay.update(
+            {},
+            replay_player,
+            second_replay_combat,
+            second_replay_actors,
+            collision_lookup);
+    }
+    check(
+        replay.deterministic_state() ==
+            second_replay.deterministic_state(),
+        "identical seed and ticks reproduce Octorok native state");
+    return replay.deterministic_state();
+}
+
+void test_octorok_rom_scenarios() {
+    using oracle::core::Campaign;
+    const auto ages = test_octorok_rom_scenario(
+        "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",
+        Campaign::ages);
+    const auto seasons = test_octorok_rom_scenario(
+        "roms/Legend of Zelda, The - Oracle of Seasons (USA).gbc",
+        Campaign::seasons);
+    if (ages.has_value() && seasons.has_value()) {
+        check(
+            ages == seasons,
+            "both cartridges drive one shared Octorok behavior path");
     }
 }
 
@@ -1107,6 +1353,7 @@ int main() {
     test_spatial_room_seams();
     test_player_traversal();
     test_vasu_rom_scenarios();
+    test_octorok_rom_scenarios();
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
         return EXIT_FAILURE;

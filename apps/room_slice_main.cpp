@@ -21,6 +21,7 @@
 
 #include "oracle/content/link_sprite.h"
 #include "oracle/content/interaction_sprite.h"
+#include "oracle/content/enemy_sprite.h"
 #include "oracle/content/rom_source.h"
 #include "oracle/content/rom_text.h"
 #include "oracle/content/room_collisions.h"
@@ -32,6 +33,7 @@
 #include "oracle/core/campaign.h"
 #include "oracle/core/actor_slot_domain.h"
 #include "oracle/gameplay/player_traversal.h"
+#include "oracle/gameplay/octorok_runtime.h"
 #include "oracle/gameplay/room_actor_loader.h"
 #include "oracle/gameplay/vasu_interaction.h"
 #include "oracle/input/input_frame.h"
@@ -584,6 +586,147 @@ void render_vasu_actors(
         };
         SDL_RenderTexture(renderer, texture, &source, &destination);
     }
+}
+
+void render_octorok_actors(
+    SDL_Renderer* renderer,
+    SDL_Texture* texture,
+    const oracle::content::EnemySpriteDecoder& sprite_decoder,
+    const oracle::gameplay::OctorokRuntime& runtime,
+    const oracle::core::ActorSlotDomain& actors,
+    const std::vector<RoomPlacement>& rooms,
+    const oracle::gameplay::PlayerState& player,
+    const bool in_front_of_player,
+    const CameraState camera,
+    const int output_width,
+    const int output_height) {
+    constexpr std::int32_t texture_size = 32;
+    const auto player_world_y =
+        oracle::gameplay::PlayerTraversal::world_y(player);
+    const auto enemy_slots =
+        actors.slots(oracle::core::ActorCategory::enemy);
+    for (std::size_t slot = 0; slot < enemy_slots.size(); ++slot) {
+        const auto& actor = enemy_slots[slot];
+        if (
+            !actor.active ||
+            !actor.positioned ||
+            actor.identity.id != 0x09) {
+            continue;
+        }
+        const auto placement = std::find_if(
+            rooms.begin(),
+            rooms.end(),
+            [&](const RoomPlacement& candidate) {
+                return candidate.layout.id == actor.room;
+            });
+        if (placement == rooms.end()) {
+            continue;
+        }
+        const auto world_x = placement->world_x + actor.local_x;
+        const auto world_y = placement->world_y + actor.local_y;
+        if ((world_y > player_world_y) != in_front_of_player) {
+            continue;
+        }
+        const oracle::core::ActorSlotHandle handle{
+            oracle::core::ActorCategory::enemy,
+            static_cast<std::uint8_t>(slot),
+            actor.generation,
+        };
+        const auto animation = runtime.animation_index(handle);
+        if (!animation.has_value()) {
+            continue;
+        }
+        const auto frame = sprite_decoder.decode_octorok(
+            *animation,
+            runtime.animation_tick(handle));
+        if (
+            frame.width > texture_size ||
+            frame.height > texture_size) {
+            throw std::runtime_error{
+                "Octorok sprite exceeds its diagnostic texture"};
+        }
+        std::array<oracle::content::RgbaPixel, texture_size * texture_size>
+            upload{};
+        for (std::int32_t y = 0; y < frame.height; ++y) {
+            std::copy_n(
+                frame.pixels.begin() +
+                    static_cast<std::size_t>(y * frame.width),
+                frame.width,
+                upload.begin() +
+                    static_cast<std::size_t>(y * texture_size));
+        }
+        if (!SDL_UpdateTexture(
+                texture,
+                nullptr,
+                upload.data(),
+                texture_size *
+                    static_cast<int>(
+                        sizeof(oracle::content::RgbaPixel)))) {
+            throw std::runtime_error{
+                std::string{"Octorok texture upload failed: "} +
+                SDL_GetError()};
+        }
+
+        const auto screen_x = static_cast<float>(
+            (world_x - camera.x) * camera.zoom +
+            output_width * 0.5);
+        const auto screen_y = static_cast<float>(
+            (world_y - camera.y) * camera.zoom +
+            output_height * 0.5);
+        const SDL_FRect source{
+            0.0f,
+            0.0f,
+            static_cast<float>(frame.width),
+            static_cast<float>(frame.height),
+        };
+        const SDL_FRect destination{
+            screen_x +
+                static_cast<float>(frame.origin_x * camera.zoom),
+            screen_y +
+                static_cast<float>(frame.origin_y * camera.zoom),
+            static_cast<float>(frame.width * camera.zoom),
+            static_cast<float>(frame.height * camera.zoom),
+        };
+        SDL_RenderTexture(renderer, texture, &source, &destination);
+    }
+}
+
+void render_sword_hitbox(
+    SDL_Renderer* renderer,
+    const oracle::gameplay::OctorokRuntime& runtime,
+    const oracle::gameplay::PlayerState& player,
+    const CameraState camera,
+    const int output_width,
+    const int output_height) {
+    const auto sword = runtime.sword_hitbox(player);
+    if (!sword.has_value()) {
+        return;
+    }
+    const auto world_x =
+        oracle::gameplay::PlayerTraversal::world_x(player) +
+        sword->center_x - player.local_x;
+    const auto world_y =
+        oracle::gameplay::PlayerTraversal::world_y(player) +
+        sword->center_y - player.local_y;
+    const SDL_FRect rectangle{
+        static_cast<float>(
+            (world_x - sword->half_width - camera.x) *
+                camera.zoom +
+            output_width * 0.5),
+        static_cast<float>(
+            (world_y - sword->half_height - camera.y) *
+                camera.zoom +
+            output_height * 0.5),
+        static_cast<float>(
+            sword->half_width * 2.0 * camera.zoom),
+        static_cast<float>(
+            sword->half_height * 2.0 * camera.zoom),
+    };
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 255, 236, 132, 170);
+    SDL_RenderFillRect(renderer, &rectangle);
+    SDL_SetRenderDrawColor(renderer, 255, 255, 238, 240);
+    SDL_RenderRect(renderer, &rectangle);
 }
 
 void render_dialogue(
@@ -1468,6 +1611,7 @@ int run_window(
     const oracle::content::LinkSpriteDecoder link_sprite_decoder{rom};
     const oracle::content::InteractionSpriteDecoder
         interaction_sprite_decoder{rom};
+    const oracle::content::EnemySpriteDecoder enemy_sprite_decoder{rom};
     SDL_Texture* link_texture = SDL_CreateTexture(
         renderer,
         SDL_PIXELFORMAT_RGBA32,
@@ -1482,6 +1626,19 @@ int run_window(
     SDL_SetTextureScaleMode(link_texture, SDL_SCALEMODE_NEAREST);
     SDL_SetTextureBlendMode(link_texture, SDL_BLENDMODE_BLEND);
     std::optional<std::uint8_t> uploaded_link_frame;
+    SDL_Texture* octorok_texture = SDL_CreateTexture(
+        renderer,
+        SDL_PIXELFORMAT_RGBA32,
+        SDL_TEXTUREACCESS_STREAMING,
+        32,
+        32);
+    if (octorok_texture == nullptr) {
+        throw std::runtime_error{
+            std::string{"Octorok texture creation failed: "} +
+            SDL_GetError()};
+    }
+    SDL_SetTextureScaleMode(octorok_texture, SDL_SCALEMODE_NEAREST);
+    SDL_SetTextureBlendMode(octorok_texture, SDL_BLENDMODE_BLEND);
     std::array<SDL_Texture*, 3> vasu_textures{};
     for (auto*& texture : vasu_textures) {
         texture = SDL_CreateTexture(
@@ -1572,9 +1729,15 @@ int run_window(
     };
     const auto selected_vasu_scenario =
         oracle::gameplay::vasu_scenario(rom.metadata().campaign);
+    const auto selected_octorok_scenario =
+        oracle::gameplay::octorok_scenario(rom.metadata().campaign);
     if (
-        spawn_position == selected_vasu_scenario.player_spawn_yx &&
-        initial_player.room == selected_vasu_scenario.room) {
+        (
+            spawn_position == selected_vasu_scenario.player_spawn_yx &&
+            initial_player.room == selected_vasu_scenario.room) ||
+        (
+            spawn_position == selected_octorok_scenario.player_spawn_yx &&
+            initial_player.room == selected_octorok_scenario.room)) {
         initial_player.facing =
             oracle::gameplay::PlayerFacing::north;
     }
@@ -1643,6 +1806,9 @@ int run_window(
             current_objects,
             current_actors);
     oracle::gameplay::VasuInteractionRuntime vasu_runtime{rom};
+    oracle::gameplay::OctorokRuntime octorok_runtime{rom};
+    oracle::gameplay::PlayerCombatState player_combat;
+    oracle::gameplay::OctorokStepReport last_combat_step;
     oracle::input::SemanticInputSampler semantic_input;
     const auto reload_current_objects = [&]() {
         current_objects = object_decoder.decode(
@@ -1813,6 +1979,11 @@ int run_window(
                 previous_player = initial_player;
                 current_player = initial_player;
                 reload_current_objects();
+                octorok_runtime.reset();
+                player_combat =
+                    oracle::gameplay::PlayerCombatState{};
+                last_combat_step =
+                    oracle::gameplay::OctorokStepReport{};
             } else if (
                 event.type == SDL_EVENT_KEY_DOWN &&
                 event.key.key == SDLK_F1 &&
@@ -1861,6 +2032,14 @@ int run_window(
                     input_frame,
                     current_player,
                     current_actors);
+                last_combat_step = octorok_runtime.update(
+                    vasu_runtime.captures_input()
+                        ? oracle::input::InputFrame{}
+                        : input_frame,
+                    current_player,
+                    player_combat,
+                    current_actors,
+                    collision_lookup);
                 const auto actor_collision_bodies =
                     oracle::gameplay::collect_actor_collision_bodies(
                         current_actors);
@@ -2127,6 +2306,18 @@ int run_window(
                 output_height);
         }
         if (player_mode) {
+            render_octorok_actors(
+                renderer,
+                octorok_texture,
+                enemy_sprite_decoder,
+                octorok_runtime,
+                current_actors,
+                rooms,
+                current_player,
+                false,
+                render_camera,
+                output_width,
+                output_height);
             render_vasu_actors(
                 renderer,
                 vasu_textures,
@@ -2175,6 +2366,25 @@ int run_window(
                 render_camera,
                 output_width,
                 output_height);
+            render_sword_hitbox(
+                renderer,
+                octorok_runtime,
+                current_player,
+                render_camera,
+                output_width,
+                output_height);
+            render_octorok_actors(
+                renderer,
+                octorok_texture,
+                enemy_sprite_decoder,
+                octorok_runtime,
+                current_actors,
+                rooms,
+                current_player,
+                true,
+                render_camera,
+                output_width,
+                output_height);
             render_vasu_actors(
                 renderer,
                 vasu_textures,
@@ -2195,7 +2405,7 @@ int run_window(
         SDL_RenderFillRect(renderer, &panel);
         SDL_SetRenderDrawColor(renderer, 232, 238, 248, SDL_ALPHA_OPAQUE);
         const std::string line_one = player_mode
-            ? "ROM runtime | WASD/arrows: move | Z/Enter: talk | X: back"
+            ? "ROM runtime | WASD/arrows: move | Z/Enter: talk | X: sword/back"
             : "Authentic ROM pixels | WASD/arrows: pan | wheel: zoom";
         const std::string line_two =
             diagnostic
@@ -2210,7 +2420,27 @@ int run_window(
             << (object_overlay
                     ? "F3: hide object anchors"
                     : "F3: show object anchors")
-            << " | actors " << actor_load_report.spawned.size();
+            << " | actors " << actor_load_report.spawned.size()
+            << " | HP "
+            << static_cast<unsigned int>(player_combat.health)
+            << '/'
+            << static_cast<unsigned int>(player_combat.maximum_health);
+        if (
+            last_combat_step.enemies_hit != 0 ||
+            last_combat_step.enemies_defeated != 0 ||
+            last_combat_step.projectiles_requested != 0) {
+            diagnostic_line
+                << " | combat "
+                << static_cast<unsigned int>(
+                       last_combat_step.enemies_hit)
+                << " hit, "
+                << static_cast<unsigned int>(
+                       last_combat_step.enemies_defeated)
+                << " defeated, "
+                << static_cast<unsigned int>(
+                       last_combat_step.projectiles_requested)
+                << " shot";
+        }
         if (!actor_load_report.failures.empty()) {
             diagnostic_line
                 << " (" << actor_load_report.failures.size()
@@ -2277,6 +2507,7 @@ int run_window(
     }
 
     SDL_DestroyTexture(link_texture);
+    SDL_DestroyTexture(octorok_texture);
     for (auto* texture : vasu_textures) {
         SDL_DestroyTexture(texture);
     }
@@ -2301,7 +2532,7 @@ int main(int argc, char* argv[]) {
                    "[--collisions] [--objects] "
                    "[--list-exits] [--follow-exit N] "
                    "[--catalog-topology] [--catalog-objects] "
-                   "[--vasu-scenario] "
+                   "[--vasu-scenario] [--octorok-scenario] "
                    "[--spawn-yx HEX] "
                    "[--tick N] [--room-flags HEX] "
                    "[--describe] [--screenshot PATH]\n";
@@ -2319,6 +2550,7 @@ int main(int argc, char* argv[]) {
         bool catalog_topology = false;
         bool catalog_objects = false;
         bool vasu_scenario_mode = false;
+        bool octorok_scenario_mode = false;
         std::optional<std::size_t> follow_exit_index;
         std::optional<std::uint8_t> spawn_position;
         auto season = oracle::content::Season::spring;
@@ -2348,6 +2580,8 @@ int main(int argc, char* argv[]) {
                 describe_only = true;
             } else if (argument == "--vasu-scenario") {
                 vasu_scenario_mode = true;
+            } else if (argument == "--octorok-scenario") {
+                octorok_scenario_mode = true;
             } else if (
                 argument == "--follow-exit" &&
                 index + 1 < argc) {
@@ -2400,6 +2634,17 @@ int main(int argc, char* argv[]) {
         if (vasu_scenario_mode) {
             const auto scenario =
                 oracle::gameplay::vasu_scenario(
+                    rom.metadata().campaign);
+            world_group =
+                static_cast<std::uint8_t>(scenario.room.area);
+            center_room =
+                static_cast<std::uint8_t>(scenario.room.room);
+            spawn_position = scenario.player_spawn_yx;
+            force_object_overlay = false;
+        }
+        if (octorok_scenario_mode) {
+            const auto scenario =
+                oracle::gameplay::octorok_scenario(
                     rom.metadata().campaign);
             world_group =
                 static_cast<std::uint8_t>(scenario.room.area);

@@ -37,6 +37,8 @@ target_compile_features(oracle_core PUBLIC cxx_std_20)
 target_link_libraries(oracle_core PUBLIC oracle_experience)
 
 add_library(oracle_content
+    src/content/enemy_data.cpp
+    src/content/enemy_sprite.cpp
     src/content/interaction_sprite.cpp
     src/content/link_sprite.cpp
     src/content/rom_source.cpp
@@ -63,6 +65,7 @@ target_link_libraries(oracle_script PUBLIC oracle_content oracle_input)
 add_library(oracle_gameplay
     src/gameplay/actor_collision.cpp
     src/gameplay/interaction_target.cpp
+    src/gameplay/octorok_runtime.cpp
     src/gameplay/player_traversal.cpp
     src/gameplay/room_actor_loader.cpp
     src/gameplay/vasu_interaction.cpp
