@@ -101,7 +101,8 @@ family in Ages `00:64` and Seasons `00:a6`. It decodes the relocated
 animation, and OAM tables. The native runtime preserves the shared retail RNG,
 states `$08-$0b`, counters, cardinal subpixel speed, contact radius, damage,
 health, and deterministic replay. Enemy contact is explicitly separate from
-solid NPC collision. Semantic action B supplies a visible provisional
+solid NPC collision. Semantic action B supplies the native parent/child sword
+allocation, retail attack timing, arc collision, and cartridge OAM
 two-strike defeat loop. See
 [`../reverse-engineering/octorok-combat-slice.md`](../reverse-engineering/octorok-combat-slice.md).
 
@@ -112,9 +113,14 @@ decodes campaign-relocated `partData` and OAM, travels at retail speed, impacts
 terrain, performs the bounded reverse bounce, expires, and applies its decoded
 player damage.
 
-Next, replace the diagnostic sword hitbox with the original sword item state,
-animation, and OAM path before broadening to random-position enemy records,
-drops, or another family.
+The sword checkpoint now reserves parent slot 2 and weapon slot 6, advances
+`LINK_ANIM_MODE_22`, maps its parameters through the shared sword arc table,
+renders `spr_swords` through original item OAM, and holds Link in the attack
+animation. See
+[`../reverse-engineering/sword-swing-slice.md`](../reverse-engineering/sword-swing-slice.md).
+
+Next, add hit/death feedback and deterministic enemy drops before broadening
+to random-position records or another enemy family.
 
 ## Following slices
 

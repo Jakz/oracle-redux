@@ -24,7 +24,6 @@ constexpr std::array<std::uint8_t, 4> walk_counter_values{
 constexpr std::array<std::uint8_t, 5> decision_masks{
     0x07, 0x07, 0x03, 0x03, 0x01,
 };
-constexpr std::uint8_t sword_duration_ticks = 8;
 constexpr std::uint8_t player_damage_invincibility_ticks = 60;
 constexpr std::int32_t projectile_speed_subpixels = 0x200;
 constexpr std::int32_t projectile_bounce_speed_subpixels = 0x40;
@@ -292,7 +291,6 @@ void OctorokRuntime::reset(const std::uint16_t rng_seed) noexcept {
     projectile_runtime_ = {};
     rng_low_ = static_cast<std::uint8_t>(rng_seed & 0xff);
     rng_high_ = static_cast<std::uint8_t>(rng_seed >> 8u);
-    sword_ticks_ = 0;
 }
 
 void OctorokRuntime::initialize_projectile(
@@ -616,11 +614,11 @@ std::uint8_t OctorokRuntime::cardinal_angle_to_player(
 }
 
 OctorokStepReport OctorokRuntime::update(
-    const input::InputFrame& input,
     const PlayerState& player,
     PlayerCombatState& combat,
     core::ActorSlotDomain& actors,
-    const EnemyCollisionLookup& collision_lookup) {
+    const EnemyCollisionLookup& collision_lookup,
+    const SwordStepReport& sword_step) {
     OctorokStepReport report;
     if (combat.invincibility_ticks != 0) {
         --combat.invincibility_ticks;
@@ -636,8 +634,7 @@ OctorokStepReport OctorokRuntime::update(
         actors,
         collision_lookup,
         report);
-    if (input.pressed(input::InputAction::b)) {
-        sword_ticks_ = sword_duration_ticks;
+    if (sword_step.started) {
         report.sword_started = true;
         for (auto& runtime : actor_runtime_) {
             runtime.hit_this_swing = false;
@@ -738,8 +735,7 @@ OctorokStepReport OctorokRuntime::update(
         }
     }
 
-    const auto sword = sword_hitbox(player);
-    if (sword.has_value()) {
+    if (sword_step.hitbox.has_value()) {
         for (std::size_t slot = 0; slot < enemy_slots.size(); ++slot) {
             const auto& immutable_actor = enemy_slots[slot];
             if (
@@ -758,7 +754,7 @@ OctorokStepReport OctorokRuntime::update(
                 actor == nullptr ||
                 runtime.hit_this_swing ||
                 runtime.hit_invincibility != 0 ||
-                !overlaps_sword(*actor, *sword)) {
+                !overlaps_sword(*actor, *sword_step.hitbox)) {
                 continue;
             }
             runtime.hit_this_swing = true;
@@ -787,9 +783,6 @@ OctorokStepReport OctorokRuntime::update(
             ++report.contacts;
             break;
         }
-    }
-    if (sword_ticks_ != 0) {
-        --sword_ticks_;
     }
     return report;
 }
@@ -853,39 +846,6 @@ std::optional<OctorokPhase> OctorokRuntime::phase(
     return actor_runtime_[actor.slot].phase;
 }
 
-std::optional<SwordHitbox> OctorokRuntime::sword_hitbox(
-    const PlayerState& player) const noexcept {
-    if (sword_ticks_ == 0) {
-        return std::nullopt;
-    }
-    SwordHitbox result{
-        .room = player.room,
-        .center_x = player.local_x,
-        .center_y = player.local_y,
-        .half_width = 5.0,
-        .half_height = 5.0,
-    };
-    switch (player.facing) {
-    case PlayerFacing::north:
-        result.center_y -= 12.0;
-        result.half_width = 7.0;
-        break;
-    case PlayerFacing::east:
-        result.center_x += 12.0;
-        result.half_height = 7.0;
-        break;
-    case PlayerFacing::south:
-        result.center_y += 12.0;
-        result.half_width = 7.0;
-        break;
-    case PlayerFacing::west:
-        result.center_x -= 12.0;
-        result.half_height = 7.0;
-        break;
-    }
-    return result;
-}
-
 std::uint64_t OctorokRuntime::deterministic_state() const noexcept {
     constexpr std::uint64_t basis = 1469598103934665603ull;
     constexpr std::uint64_t prime = 1099511628211ull;
@@ -896,7 +856,6 @@ std::uint64_t OctorokRuntime::deterministic_state() const noexcept {
     };
     append(rng_low_);
     append(rng_high_);
-    append(sword_ticks_);
     for (const auto& runtime : actor_runtime_) {
         append(runtime.generation);
         append(static_cast<std::uint8_t>(runtime.phase));

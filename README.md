@@ -129,7 +129,10 @@ The scaffold currently contains:
 - a shared native Octorok combat path with cartridge-decoded enemy properties,
   compression mode, directional OAM, authentic sprite pixels, original RNG
   and action counters, non-solid contact damage, damage invincibility, and a
-  deterministic two-hit diagnostic sword/defeat loop;
+  deterministic two-hit defeat loop;
+- a shared native sword path with reserved parent-item slot allocation,
+  original Link attack timing and frames, byte-mapped collision arcs, and
+  cartridge-decoded `spr_swords` item OAM;
 - live ROM tile-warp and vertical screen-edge execution with destination-group
   loading, transition-aware placement, and warp re-entry suppression;
 - all 256 small rooms in world groups 0–3, with full-resolution atlas export;
@@ -186,10 +189,11 @@ build/oracle_room_slice path/to/oracle.gbc --octorok-scenario
 
 Octoroks now allocate their original `$18` projectile in the bounded part
 band. Its ROM graphics, wall impact, reverse bounce, expiry, and player damage
-are active. Use `X` for the provisional semantic sword strike. The decoded
-enemy and projectile paths, exact/provisional boundary, and next sword step
-are documented in
+are active. Use `X` for the native sword swing. The decoded enemy and
+projectile paths are documented in
 [`docs/reverse-engineering/octorok-combat-slice.md`](docs/reverse-engineering/octorok-combat-slice.md).
+The parent-item timing, arc, and OAM map is in
+[`docs/reverse-engineering/sword-swing-slice.md`](docs/reverse-engineering/sword-swing-slice.md).
 
 Choose another room by its hexadecimal overworld coordinate:
 

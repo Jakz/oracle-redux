@@ -26,12 +26,14 @@
 #include "oracle/content/room_mutations.h"
 #include "oracle/content/room_pixels.h"
 #include "oracle/content/room_topology.h"
+#include "oracle/content/sword_sprite.h"
 #include "oracle/experience_settings.h"
 #include "oracle/gameplay/actor_collision.h"
 #include "oracle/gameplay/interaction_target.h"
 #include "oracle/gameplay/octorok_runtime.h"
 #include "oracle/gameplay/player_traversal.h"
 #include "oracle/gameplay/room_actor_loader.h"
+#include "oracle/gameplay/sword_runtime.h"
 #include "oracle/gameplay/vasu_interaction.h"
 #include "oracle/input/input_frame.h"
 #include "oracle/core/item_campaign_policy.h"
@@ -436,6 +438,125 @@ void test_link_sprite_facing(
     }
 }
 
+void test_sword_rom_scenario(
+    const std::filesystem::path& path,
+    const oracle::core::Campaign campaign) {
+    if (!std::filesystem::exists(path)) {
+        return;
+    }
+    using oracle::content::LinkSpriteDecoder;
+    using oracle::content::RomSource;
+    using oracle::content::SwordSpriteDecoder;
+    using oracle::core::ActorCategory;
+    using oracle::core::ActorSlotDomain;
+    using oracle::gameplay::PlayerFacing;
+    using oracle::gameplay::PlayerState;
+    using oracle::gameplay::SwordRuntime;
+    using oracle::input::InputAction;
+
+    const auto rom = RomSource::load(path);
+    check(
+        rom.metadata().campaign == campaign,
+        "sword test ROM campaign matches");
+    const SwordSpriteDecoder sword_decoder{rom};
+    for (std::uint8_t animation = 0; animation < 8; ++animation) {
+        const auto frame = sword_decoder.decode(animation);
+        check(
+            frame.original_oam_index == animation &&
+                frame.width > 0 &&
+                frame.height > 0 &&
+                std::any_of(
+                    frame.pixels.begin(),
+                    frame.pixels.end(),
+                    [](const oracle::content::RgbaPixel pixel) {
+                        return pixel.alpha != 0;
+                    }),
+            "sword animation decodes nonempty original OAM pixels");
+    }
+    const auto attack_link =
+        LinkSpriteDecoder{rom}.decode_original_frame(0xac);
+    check(
+        attack_link.original_frame == 0xac,
+        "Link decoder accepts the retail sword attack frame");
+
+    ActorSlotDomain actors;
+    SwordRuntime runtime;
+    const PlayerState player{
+        .room = oracle::core::WorldRoomId{.area = 0, .room = 0x64},
+        .local_x = 80.0,
+        .local_y = 64.0,
+        .facing = PlayerFacing::north,
+    };
+    const auto first = runtime.update(
+        pressed_frame(InputAction::b),
+        player,
+        actors);
+    check(
+        first.started &&
+            first.pose.has_value() &&
+            first.pose->actor.slot == 6 &&
+            first.pose->arc_index == 0 &&
+            first.pose->animation_index == 2 &&
+            first.pose->link_frame == 0xac &&
+            first.pose->animation_parameter == 0x00 &&
+            actors.slots(ActorCategory::item)[2].active &&
+            actors.active_count(ActorCategory::item) == 2,
+        "sword press reserves parent slot 2 and weapon slot 6");
+    const auto first_generation =
+        first.pose.has_value() ? first.pose->actor.generation : 0;
+
+    (void)runtime.update({}, player, actors);  // tick 1
+    (void)runtime.update({}, player, actors);  // tick 2
+    const auto second_pose = runtime.update({}, player, actors);  // tick 3
+    check(
+        second_pose.pose.has_value() &&
+            second_pose.pose->arc_index == 4 &&
+            second_pose.pose->animation_index == 1 &&
+            second_pose.pose->link_frame == 0xb0 &&
+            second_pose.pose->animation_parameter == 0x02,
+        "sword tick 3 advances through LINK_ANIM_MODE_22");
+
+    (void)runtime.update({}, player, actors);  // tick 4
+    (void)runtime.update({}, player, actors);  // tick 5
+    const auto third_pose = runtime.update({}, player, actors);  // tick 6
+    check(
+        third_pose.pose.has_value() &&
+            third_pose.pose->arc_index == 8 &&
+            third_pose.pose->animation_index == 0 &&
+            third_pose.pose->link_frame == 0xb4 &&
+            third_pose.pose->animation_parameter == 0x64,
+        "sword tick 6 preserves the tile-break parameter pose");
+
+    for (int tick = 7; tick < 14; ++tick) {
+        (void)runtime.update({}, player, actors);
+    }
+    const auto final_pose = runtime.update({}, player, actors);  // tick 14
+    check(
+        final_pose.pose.has_value() &&
+            final_pose.pose->arc_index == 12 &&
+            final_pose.pose->animation_index == 0 &&
+            final_pose.pose->link_frame == 0xb0 &&
+            final_pose.pose->animation_parameter == 0x06,
+        "sword tick 14 selects the final active retail pose");
+    (void)runtime.update({}, player, actors);  // tick 15
+    (void)runtime.update({}, player, actors);  // tick 16
+    const auto ended = runtime.update({}, player, actors);  // end marker
+    check(
+        ended.ended &&
+            !ended.pose.has_value() &&
+            actors.active_count(ActorCategory::item) == 0,
+        "sword end marker releases the reserved item slot");
+    const auto restarted = runtime.update(
+        pressed_frame(InputAction::b),
+        player,
+        actors);
+    check(
+        restarted.started &&
+            restarted.pose.has_value() &&
+            restarted.pose->actor.generation != first_generation,
+        "a later sword press allocates a fresh item-slot generation");
+}
+
 void test_vasu_rom_scenarios() {
     using oracle::core::Campaign;
     using oracle::script::OriginalActorField;
@@ -622,7 +743,6 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
     PlayerCombatState combat;
     OctorokRuntime runtime{rom, 0x5a17};
     const auto contact = runtime.update(
-        {},
         player,
         combat,
         actors,
@@ -633,7 +753,6 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
             combat.invincibility_ticks != 0,
         "Octorok contact applies the ROM's two health-unit damage");
     const auto contact_again = runtime.update(
-        {},
         player,
         combat,
         actors,
@@ -670,13 +789,11 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
     };
     clear_room.values[1 * 10 + 2] = 0x0f;
     (void)impact_runtime.update(
-        {},
         distant_player,
         impact_combat,
         impact_actors,
         collision_lookup);
     const auto impact = impact_runtime.update(
-        {},
         distant_player,
         impact_combat,
         impact_actors,
@@ -688,7 +805,6 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
                 oracle::gameplay::OctorokProjectilePhase::impact,
         "projectile enters its retail impact state at solid terrain");
     (void)impact_runtime.update(
-        {},
         distant_player,
         impact_combat,
         impact_actors,
@@ -699,7 +815,6 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
                 oracle::gameplay::OctorokProjectilePhase::bouncing,
         "terrain impact reverses the projectile into a bounded bounce");
     (void)impact_runtime.update(
-        {},
         distant_player,
         impact_combat,
         impact_actors,
@@ -710,7 +825,6 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
         "bouncing projectile exposes original vertical motion");
     for (int tick = 0; tick < 32; ++tick) {
         (void)impact_runtime.update(
-            {},
             distant_player,
             impact_combat,
             impact_actors,
@@ -743,14 +857,12 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
         .local_y = 40.0,
     };
     (void)projectile_contact_runtime.update(
-        {},
         projectile_target,
         projectile_combat,
         projectile_contact_actors,
         collision_lookup);
     const auto projectile_contact =
         projectile_contact_runtime.update(
-            {},
             projectile_target,
             projectile_combat,
             projectile_contact_actors,
@@ -782,15 +894,22 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
     if (active_octorok == nullptr) {
         return std::nullopt;
     }
-    player.local_x = active_octorok->local_x;
-    player.local_y = active_octorok->local_y + 12.0;
+    // The north-facing retail swing begins to Link's right before sweeping
+    // upward and left; place the target on that first arc record.
+    player.local_x = active_octorok->local_x - 16.0;
+    player.local_y = active_octorok->local_y + 2.0;
     player.facing = PlayerFacing::north;
-    const auto first_strike = runtime.update(
+    oracle::gameplay::SwordRuntime sword_runtime;
+    const auto first_sword = sword_runtime.update(
         pressed_frame(InputAction::b),
+        player,
+        actors);
+    const auto first_strike = runtime.update(
         player,
         combat,
         actors,
-        collision_lookup);
+        collision_lookup,
+        first_sword);
     active_octorok = locate_octorok();
     check(
         first_strike.sword_started &&
@@ -800,24 +919,41 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
             active_octorok->health == 1,
         "first semantic sword strike removes one Octorok health unit");
     for (int tick = 0; tick < 13; ++tick) {
-        (void)runtime.update(
+        const auto sword_step = sword_runtime.update(
             {},
+            player,
+            actors);
+        (void)runtime.update(
             player,
             combat,
             actors,
-            collision_lookup);
+            collision_lookup,
+            sword_step);
+    }
+    for (int tick = 0; tick < 4; ++tick) {
+        const auto sword_step = sword_runtime.update({}, player, actors);
+        (void)runtime.update(
+            player,
+            combat,
+            actors,
+            collision_lookup,
+            sword_step);
     }
     active_octorok = locate_octorok();
     if (active_octorok != nullptr) {
-        player.local_x = active_octorok->local_x;
-        player.local_y = active_octorok->local_y + 12.0;
+        player.local_x = active_octorok->local_x - 16.0;
+        player.local_y = active_octorok->local_y + 2.0;
     }
-    const auto second_strike = runtime.update(
+    const auto second_sword = sword_runtime.update(
         pressed_frame(InputAction::b),
+        player,
+        actors);
+    const auto second_strike = runtime.update(
         player,
         combat,
         actors,
-        collision_lookup);
+        collision_lookup,
+        second_sword);
     check(
         second_strike.enemies_hit == 1 &&
             second_strike.enemies_defeated == 1 &&
@@ -836,7 +972,6 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
     std::uint32_t replay_projectiles = 0;
     for (int tick = 0; tick < 1200; ++tick) {
         const auto step = replay.update(
-            {},
             replay_player,
             replay_combat,
             replay_actors,
@@ -853,7 +988,6 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
     PlayerCombatState second_replay_combat;
     for (int tick = 0; tick < 1200; ++tick) {
         (void)second_replay.update(
-            {},
             replay_player,
             second_replay_combat,
             second_replay_actors,
@@ -1557,6 +1691,12 @@ int main() {
         "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",
         oracle::core::Campaign::ages);
     test_link_sprite_facing(
+        "roms/Legend of Zelda, The - Oracle of Seasons (USA).gbc",
+        oracle::core::Campaign::seasons);
+    test_sword_rom_scenario(
+        "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",
+        oracle::core::Campaign::ages);
+    test_sword_rom_scenario(
         "roms/Legend of Zelda, The - Oracle of Seasons (USA).gbc",
         oracle::core::Campaign::seasons);
     test_vasu_rom_scenarios();

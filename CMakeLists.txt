@@ -51,6 +51,7 @@ add_library(oracle_content
     src/content/room_mutations.cpp
     src/content/room_pixels.cpp
     src/content/room_topology.cpp
+    src/content/sword_sprite.cpp
 )
 target_include_directories(oracle_content PUBLIC include)
 target_compile_features(oracle_content PUBLIC cxx_std_20)
@@ -70,6 +71,7 @@ add_library(oracle_gameplay
     src/gameplay/octorok_runtime.cpp
     src/gameplay/player_traversal.cpp
     src/gameplay/room_actor_loader.cpp
+    src/gameplay/sword_runtime.cpp
     src/gameplay/vasu_interaction.cpp
 )
 target_include_directories(oracle_gameplay PUBLIC include)

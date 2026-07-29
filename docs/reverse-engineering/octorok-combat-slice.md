@@ -103,14 +103,14 @@ Enemy contact and solid NPC bodies remain separate:
 - contact removes two of Link's twelve quarter-heart units;
 - a bounded 60-tick player damage-invincibility window prevents repeated
   overlap damage;
-- `X` maps to semantic action B and starts an eight-tick provisional sword
-  hitbox;
+- `X` maps to semantic action B and starts the native 17-tick sword arc;
 - each swing can damage a given actor once; two one-damage swings release the
   two-health Octorok slot.
 
-The sword rectangle is deliberately a visible diagnostic primitive. Original
-sword item state, animation, OAM, knockback, enemy hit effects, drops, and
-sound are not claimed by this slice.
+The sword now follows the original parent/child item slot, Link animation,
+arc-position, collision, graphics, and OAM path documented in
+[`sword-swing-slice.md`](sword-swing-slice.md). Knockback, enemy hit effects,
+drops, tile breaking, charging/spin states, and sound are not yet claimed.
 
 ## Projectile part path
 
@@ -170,6 +170,5 @@ The headless dual-ROM tests assert:
 
 ## Next boundary
 
-Replace the diagnostic sword rectangle with the original parent-item state,
-animation, and OAM path. Random-position enemy records and enemy drops should
-follow the completed enemy/part paths and the representative sword item path.
+Add original hit/death feedback and RNG-backed enemy drops now that the
+representative enemy, part, and sword item paths are connected.

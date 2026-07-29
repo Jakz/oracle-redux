@@ -138,7 +138,6 @@ LinkSpriteFrame LinkSpriteDecoder::decode(
     const LinkDirection direction,
     const bool moving,
     const std::uint64_t animation_tick) const {
-    const auto offsets = offsets_for(rom_.metadata().campaign);
     const auto direction_index =
         static_cast<std::uint8_t>(direction);
     if (direction_index > 3) {
@@ -153,6 +152,12 @@ LinkSpriteFrame LinkSpriteDecoder::decode(
         : walking_frame_a_base;
     const auto frame_index =
         static_cast<std::uint8_t>(frame_base + direction_index);
+    return decode_original_frame(frame_index);
+}
+
+LinkSpriteFrame LinkSpriteDecoder::decode_original_frame(
+    const std::uint8_t frame_index) const {
+    const auto offsets = offsets_for(rom_.metadata().campaign);
     const auto frame_record =
         offsets.graphics_table +
         static_cast<std::size_t>(frame_index) * 3;

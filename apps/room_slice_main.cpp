@@ -31,11 +31,13 @@
 #include "oracle/content/room_objects.h"
 #include "oracle/content/room_pixels.h"
 #include "oracle/content/room_topology.h"
+#include "oracle/content/sword_sprite.h"
 #include "oracle/core/campaign.h"
 #include "oracle/core/actor_slot_domain.h"
 #include "oracle/gameplay/player_traversal.h"
 #include "oracle/gameplay/octorok_runtime.h"
 #include "oracle/gameplay/room_actor_loader.h"
+#include "oracle/gameplay/sword_runtime.h"
 #include "oracle/gameplay/vasu_interaction.h"
 #include "oracle/input/input_frame.h"
 #include "oracle/presentation/frame_timing.h"
@@ -777,42 +779,71 @@ void render_octorok_projectiles(
     }
 }
 
-void render_sword_hitbox(
+void render_sword(
     SDL_Renderer* renderer,
-    const oracle::gameplay::OctorokRuntime& runtime,
+    SDL_Texture* texture,
+    const oracle::content::SwordSpriteDecoder& sprite_decoder,
+    const oracle::gameplay::SwordStepReport& sword_step,
     const oracle::gameplay::PlayerState& player,
     const CameraState camera,
     const int output_width,
     const int output_height) {
-    const auto sword = runtime.sword_hitbox(player);
-    if (!sword.has_value()) {
+    if (!sword_step.pose.has_value()) {
         return;
+    }
+    constexpr std::int32_t texture_size = 32;
+    const auto& pose = *sword_step.pose;
+    const auto frame =
+        sprite_decoder.decode(pose.animation_index);
+    std::array<
+        oracle::content::RgbaPixel,
+        texture_size * texture_size> upload{};
+    for (std::int32_t y = 0; y < frame.height; ++y) {
+        std::copy_n(
+            frame.pixels.begin() +
+                static_cast<std::size_t>(y * frame.width),
+            frame.width,
+            upload.begin() +
+                static_cast<std::size_t>(y * texture_size));
+    }
+    if (!SDL_UpdateTexture(
+            texture,
+            nullptr,
+            upload.data(),
+            texture_size *
+                static_cast<int>(
+                    sizeof(oracle::content::RgbaPixel)))) {
+        throw std::runtime_error{
+            std::string{"sword texture upload failed: "} +
+            SDL_GetError()};
     }
     const auto world_x =
         oracle::gameplay::PlayerTraversal::world_x(player) +
-        sword->center_x - player.local_x;
+        pose.local_x - player.local_x;
     const auto world_y =
         oracle::gameplay::PlayerTraversal::world_y(player) +
-        sword->center_y - player.local_y;
-    const SDL_FRect rectangle{
+        pose.local_y - player.local_y;
+    const SDL_FRect source{
+        0.0f,
+        0.0f,
+        static_cast<float>(frame.width),
+        static_cast<float>(frame.height),
+    };
+    const SDL_FRect destination{
         static_cast<float>(
-            (world_x - sword->half_width - camera.x) *
+            (world_x + frame.origin_x - camera.x) *
                 camera.zoom +
             output_width * 0.5),
         static_cast<float>(
-            (world_y - sword->half_height - camera.y) *
+            (world_y + frame.origin_y - camera.y) *
                 camera.zoom +
             output_height * 0.5),
         static_cast<float>(
-            sword->half_width * 2.0 * camera.zoom),
+            frame.width * camera.zoom),
         static_cast<float>(
-            sword->half_height * 2.0 * camera.zoom),
+            frame.height * camera.zoom),
     };
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(renderer, 255, 236, 132, 170);
-    SDL_RenderFillRect(renderer, &rectangle);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 238, 240);
-    SDL_RenderRect(renderer, &rectangle);
+    SDL_RenderTexture(renderer, texture, &source, &destination);
 }
 
 void render_dialogue(
@@ -1699,6 +1730,7 @@ int run_window(
         interaction_sprite_decoder{rom};
     const oracle::content::EnemySpriteDecoder enemy_sprite_decoder{rom};
     const oracle::content::PartSpriteDecoder part_sprite_decoder{rom};
+    const oracle::content::SwordSpriteDecoder sword_sprite_decoder{rom};
     const auto octorok_projectile_frame =
         part_sprite_decoder.decode_octorok_projectile();
     SDL_Texture* link_texture = SDL_CreateTexture(
@@ -1715,6 +1747,19 @@ int run_window(
     SDL_SetTextureScaleMode(link_texture, SDL_SCALEMODE_NEAREST);
     SDL_SetTextureBlendMode(link_texture, SDL_BLENDMODE_BLEND);
     std::optional<std::uint8_t> uploaded_link_frame;
+    SDL_Texture* sword_texture = SDL_CreateTexture(
+        renderer,
+        SDL_PIXELFORMAT_RGBA32,
+        SDL_TEXTUREACCESS_STREAMING,
+        32,
+        32);
+    if (sword_texture == nullptr) {
+        throw std::runtime_error{
+            std::string{"sword texture creation failed: "} +
+            SDL_GetError()};
+    }
+    SDL_SetTextureScaleMode(sword_texture, SDL_SCALEMODE_NEAREST);
+    SDL_SetTextureBlendMode(sword_texture, SDL_BLENDMODE_BLEND);
     SDL_Texture* octorok_texture = SDL_CreateTexture(
         renderer,
         SDL_PIXELFORMAT_RGBA32,
@@ -1921,8 +1966,10 @@ int run_window(
             current_actors);
     oracle::gameplay::VasuInteractionRuntime vasu_runtime{rom};
     oracle::gameplay::OctorokRuntime octorok_runtime{rom};
+    oracle::gameplay::SwordRuntime sword_runtime;
     oracle::gameplay::PlayerCombatState player_combat;
     oracle::gameplay::OctorokStepReport last_combat_step;
+    oracle::gameplay::SwordStepReport last_sword_step;
     oracle::input::SemanticInputSampler semantic_input;
     const auto reload_current_objects = [&]() {
         current_objects = object_decoder.decode(
@@ -2094,10 +2141,13 @@ int run_window(
                 current_player = initial_player;
                 reload_current_objects();
                 octorok_runtime.reset();
+                sword_runtime.reset();
                 player_combat =
                     oracle::gameplay::PlayerCombatState{};
                 last_combat_step =
                     oracle::gameplay::OctorokStepReport{};
+                last_sword_step =
+                    oracle::gameplay::SwordStepReport{};
             } else if (
                 event.type == SDL_EVENT_KEY_DOWN &&
                 event.key.key == SDLK_F1 &&
@@ -2146,14 +2196,20 @@ int run_window(
                     input_frame,
                     current_player,
                     current_actors);
-                last_combat_step = octorok_runtime.update(
+                const auto gameplay_input =
                     vasu_runtime.captures_input()
-                        ? oracle::input::InputFrame{}
-                        : input_frame,
+                    ? oracle::input::InputFrame{}
+                    : input_frame;
+                last_sword_step = sword_runtime.update(
+                    gameplay_input,
+                    current_player,
+                    current_actors);
+                last_combat_step = octorok_runtime.update(
                     current_player,
                     player_combat,
                     current_actors,
-                    collision_lookup);
+                    collision_lookup,
+                    last_sword_step);
                 const auto actor_collision_bodies =
                     oracle::gameplay::collect_actor_collision_bodies(
                         current_actors);
@@ -2162,11 +2218,15 @@ int run_window(
                         current_player,
                         oracle::gameplay::MovementInput{
                             .horizontal =
-                                vasu_runtime.captures_input()
+                                (
+                                    vasu_runtime.captures_input() ||
+                                    last_sword_step.pose.has_value())
                                 ? 0.0
                                 : horizontal,
                             .vertical =
-                                vasu_runtime.captures_input()
+                                (
+                                    vasu_runtime.captures_input() ||
+                                    last_sword_step.pose.has_value())
                                 ? 0.0
                                 : vertical,
                         },
@@ -2456,10 +2516,14 @@ int run_window(
                 render_camera,
                 output_width,
                 output_height);
-            const auto link_frame = link_sprite_decoder.decode(
-                link_direction(current_player.facing),
-                player_moving,
-                logic_tick);
+            const auto link_frame =
+                last_sword_step.pose.has_value()
+                ? link_sprite_decoder.decode_original_frame(
+                      last_sword_step.pose->link_frame)
+                : link_sprite_decoder.decode(
+                      link_direction(current_player.facing),
+                      player_moving,
+                      logic_tick);
             if (
                 !uploaded_link_frame.has_value() ||
                 *uploaded_link_frame != link_frame.original_frame) {
@@ -2492,9 +2556,11 @@ int run_window(
                 render_camera,
                 output_width,
                 output_height);
-            render_sword_hitbox(
+            render_sword(
                 renderer,
-                octorok_runtime,
+                sword_texture,
+                sword_sprite_decoder,
+                last_sword_step,
                 current_player,
                 render_camera,
                 output_width,
@@ -2648,6 +2714,7 @@ int run_window(
     }
 
     SDL_DestroyTexture(link_texture);
+    SDL_DestroyTexture(sword_texture);
     SDL_DestroyTexture(octorok_texture);
     SDL_DestroyTexture(projectile_texture);
     for (auto* texture : vasu_textures) {

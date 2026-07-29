@@ -10,7 +10,7 @@
 #include "oracle/content/room_collisions.h"
 #include "oracle/core/actor_slot_domain.h"
 #include "oracle/gameplay/player_traversal.h"
-#include "oracle/input/input_frame.h"
+#include "oracle/gameplay/sword_runtime.h"
 
 namespace oracle::gameplay {
 
@@ -41,14 +41,6 @@ struct PlayerCombatState {
     std::uint8_t invincibility_ticks{};
 };
 
-struct SwordHitbox {
-    core::WorldRoomId room;
-    double center_x{};
-    double center_y{};
-    double half_width{};
-    double half_height{};
-};
-
 struct OctorokStepReport {
     std::uint8_t contacts{};
     std::uint8_t enemies_hit{};
@@ -76,11 +68,11 @@ public:
     void reset(std::uint16_t rng_seed = 0x5a17) noexcept;
 
     [[nodiscard]] OctorokStepReport update(
-        const input::InputFrame& input,
         const PlayerState& player,
         PlayerCombatState& combat,
         core::ActorSlotDomain& actors,
-        const EnemyCollisionLookup& collision_lookup);
+        const EnemyCollisionLookup& collision_lookup,
+        const SwordStepReport& sword = {});
 
     [[nodiscard]] std::optional<std::uint8_t> animation_index(
         core::ActorSlotHandle actor) const noexcept;
@@ -92,8 +84,6 @@ public:
     projectile_phase(core::ActorSlotHandle actor) const noexcept;
     [[nodiscard]] double projectile_elevation(
         core::ActorSlotHandle actor) const noexcept;
-    [[nodiscard]] std::optional<SwordHitbox> sword_hitbox(
-        const PlayerState& player) const noexcept;
     [[nodiscard]] std::uint64_t deterministic_state() const noexcept;
 
 private:
@@ -168,7 +158,6 @@ private:
         projectile_runtime_{};
     std::uint8_t rng_low_{};
     std::uint8_t rng_high_{};
-    std::uint8_t sword_ticks_{};
 };
 
 }  // namespace oracle::gameplay

@@ -34,6 +34,10 @@ public:
         bool moving,
         std::uint64_t animation_tick) const;
 
+    // Decodes a frame index already selected by a retail Link animation.
+    [[nodiscard]] LinkSpriteFrame decode_original_frame(
+        std::uint8_t frame_index) const;
+
 private:
     const RomSource& rom_;
 };
