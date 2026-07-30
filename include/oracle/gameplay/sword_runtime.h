@@ -22,6 +22,7 @@ struct SwordPose {
     core::WorldRoomId room;
     double local_x{};
     double local_y{};
+    double visual_elevation{2.0};
     std::uint8_t arc_index{};
     std::uint8_t animation_index{};
     std::uint8_t link_frame{};

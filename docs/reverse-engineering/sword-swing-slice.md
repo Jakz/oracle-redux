@@ -101,12 +101,36 @@ OAM pointers select the shared bank-relative records `$4f69`, `$4ffc`,
 offsets `$04cfxx/$04d0xx` in Ages bank 13 and `$048fxx/$0490xx` in Seasons
 bank 12.
 
+### Presentation coordinates
+
+Game Boy OAM stores sprite Y with a hardware bias: the visible top of an
+8-by-16 object is `OAM Y - 16`. The runtime already expresses Link and item
+positions in world coordinates without that bias, so both Link and sword
+decoders retain a signed draw origin relative to their world anchor. The
+sword child is also drawn two pixels above its logical Y, matching
+`itemInitializeFromLinkPosition` setting `Item.zh = Link.zh - 2`.
+
+Attack poses are not constrained to a synthetic 16-by-16 canvas. Their OAM
+bounds may extend above or sideways from Link (`$b4` shifts the north pose
+upward, for example), and the decoder expands the returned frame so those
+pixels are preserved instead of clipped.
+
+All eight sword frames and all eight Octorok direction/phase frames are
+decoded and uploaded once when the renderer starts. Link uploads only when
+its selected original frame changes, and Vasu does the same for its selected
+OAM frame. Animated-room checks reuse cached tileset descriptions. This keeps
+ROM decoding out of the per-present path, which is particularly important in
+an unoptimized Visual Studio Debug build.
+
 ## Verification
 
 The native tests cover both exact US cartridges and assert that:
 
 - the attack Link frame can be decoded by its retail frame index;
+- shifted Link attack OAM expands its bounds without clipping;
 - all eight sword OAM compositions decode to nonempty cartridge pixels;
+- the opening north sword visual is anchored above-right of Link after the
+  hardware Y bias and original two-pixel elevation are applied;
 - a press allocates parent slot 2 and weapon slot 6, then selects north arc 0
   / animation 2;
 - the four retail timing ranges select the expected parameters and poses;

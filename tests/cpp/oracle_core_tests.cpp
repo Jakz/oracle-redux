@@ -435,7 +435,21 @@ void test_link_sprite_facing(
         check(
             walk_b.original_frame == 0x80 + index,
             "second walking phase preserves Link facing");
+        check(
+            idle.origin_x == -8 &&
+                idle.origin_y == -8 &&
+                idle.width == 16 &&
+                idle.height == 16,
+            "ordinary Link frames retain the original 16x16 anchor");
     }
+
+    const auto north_attack = decoder.decode_original_frame(0xb4);
+    check(
+        north_attack.origin_y < -8 &&
+            north_attack.pixels.size() ==
+                static_cast<std::size_t>(
+                    north_attack.width * north_attack.height),
+        "shifted attack OAM expands above Link without clipping");
 }
 
 void test_sword_rom_scenario(
@@ -476,8 +490,11 @@ void test_sword_rom_scenario(
     const auto attack_link =
         LinkSpriteDecoder{rom}.decode_original_frame(0xac);
     check(
-        attack_link.original_frame == 0xac,
-        "Link decoder accepts the retail sword attack frame");
+        attack_link.original_frame == 0xac &&
+            attack_link.pixels.size() ==
+                static_cast<std::size_t>(
+                    attack_link.width * attack_link.height),
+        "Link decoder preserves the full retail sword attack frame");
 
     ActorSlotDomain actors;
     SwordRuntime runtime;
@@ -498,10 +515,22 @@ void test_sword_rom_scenario(
             first.pose->arc_index == 0 &&
             first.pose->animation_index == 2 &&
             first.pose->link_frame == 0xac &&
+            first.pose->visual_elevation == 2.0 &&
             first.pose->animation_parameter == 0x00 &&
             actors.slots(ActorCategory::item)[2].active &&
             actors.active_count(ActorCategory::item) == 2,
         "sword press reserves parent slot 2 and weapon slot 6");
+    const auto opening_sword = sword_decoder.decode(2);
+    check(
+        opening_sword.origin_y <= -8 &&
+            first.pose->local_x +
+                    static_cast<double>(opening_sword.origin_x) >
+                player.local_x &&
+            first.pose->local_y -
+                    first.pose->visual_elevation +
+                    static_cast<double>(opening_sword.origin_y) <
+                player.local_y,
+        "north opening sword frame is anchored above-right of Link");
     const auto first_generation =
         first.pose.has_value() ? first.pose->actor.generation : 0;
 

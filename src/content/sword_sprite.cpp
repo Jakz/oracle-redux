@@ -218,7 +218,8 @@ SwordSpriteFrame SwordSpriteDecoder::decode(
         .animation_index = animation_index,
         .original_oam_index = animation_index,
         .origin_x = minimum_x,
-        .origin_y = minimum_y,
+        // Runtime world Y omits the Game Boy's 16-pixel status-bar bias.
+        .origin_y = minimum_y - 16,
         .width = maximum_x - minimum_x,
         .height = maximum_y - minimum_y,
     };

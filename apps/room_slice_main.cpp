@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -413,6 +414,7 @@ oracle::content::LinkDirection link_direction(
 void render_player(
     SDL_Renderer* renderer,
     SDL_Texture* texture,
+    const oracle::content::LinkSpriteFrame& frame,
     const double world_x,
     const double world_y,
     const CameraState camera,
@@ -422,8 +424,6 @@ void render_player(
         (world_x - camera.x) * camera.zoom + output_width * 0.5);
     const auto screen_y = static_cast<float>(
         (world_y - camera.y) * camera.zoom + output_height * 0.5);
-    const auto half_width = static_cast<float>(8.0 * camera.zoom);
-    const auto half_height = static_cast<float>(8.0 * camera.zoom);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, 4, 10, 14, 145);
     const SDL_FRect shadow{
@@ -434,13 +434,23 @@ void render_player(
     };
     SDL_RenderFillRect(renderer, &shadow);
 
-    const SDL_FRect sprite{
-        .x = screen_x - half_width,
-        .y = screen_y - half_height,
-        .w = half_width * 2.0f,
-        .h = half_height * 2.0f,
+    const SDL_FRect source{
+        .x = 0.0f,
+        .y = 0.0f,
+        .w = static_cast<float>(frame.width),
+        .h = static_cast<float>(frame.height),
     };
-    SDL_RenderTexture(renderer, texture, nullptr, &sprite);
+    const SDL_FRect sprite{
+        .x =
+            screen_x +
+            static_cast<float>(frame.origin_x * camera.zoom),
+        .y =
+            screen_y +
+            static_cast<float>(frame.origin_y * camera.zoom),
+        .w = static_cast<float>(frame.width * camera.zoom),
+        .h = static_cast<float>(frame.height * camera.zoom),
+    };
+    SDL_RenderTexture(renderer, texture, &source, &sprite);
 }
 
 std::optional<oracle::input::InputAction> semantic_action(
@@ -487,6 +497,9 @@ void render_vasu_actors(
     SDL_Renderer* renderer,
     const std::array<SDL_Texture*, 3>& textures,
     const oracle::content::InteractionSpriteDecoder& sprite_decoder,
+    std::array<
+        std::optional<oracle::content::InteractionSpriteFrame>,
+        3>& cached_frames,
     const oracle::core::ActorSlotDomain& actors,
     const std::vector<RoomPlacement>& rooms,
     const oracle::gameplay::PlayerState& player,
@@ -526,36 +539,54 @@ void render_vasu_actors(
         if ((world_y > player_world_y) != in_front_of_player) {
             continue;
         }
-        const auto frame = sprite_decoder.decode_vasu(
-            actor.identity.subid,
-            animation_tick);
+        const auto texture_index =
+            vasu_texture_index(actor.identity.subid);
+        const auto desired_oam =
+            oracle::content::InteractionSpriteDecoder::
+                select_vasu_oam_index(
+                    actor.identity.subid,
+                    animation_tick);
+        auto& cached_frame = cached_frames[texture_index];
+        bool upload_needed = false;
+        if (
+            !cached_frame.has_value() ||
+            cached_frame->original_oam_index != desired_oam) {
+            cached_frame = sprite_decoder.decode_vasu(
+                actor.identity.subid,
+                animation_tick);
+            upload_needed = true;
+        }
+        const auto& frame = *cached_frame;
         if (
             frame.width > texture_size ||
             frame.height > texture_size) {
             throw std::runtime_error{
                 "Vasu sprite exceeds its diagnostic texture"};
         }
-        std::array<oracle::content::RgbaPixel, texture_size * texture_size>
-            upload{};
-        for (std::int32_t y = 0; y < frame.height; ++y) {
-            std::copy_n(
-                frame.pixels.begin() +
-                    static_cast<std::size_t>(y * frame.width),
-                frame.width,
-                upload.begin() +
-                    static_cast<std::size_t>(y * texture_size));
-        }
-        auto* texture = textures[vasu_texture_index(actor.identity.subid)];
-        if (!SDL_UpdateTexture(
+        auto* texture = textures[texture_index];
+        if (upload_needed) {
+            std::array<
+                oracle::content::RgbaPixel,
+                texture_size * texture_size> upload{};
+            for (std::int32_t y = 0; y < frame.height; ++y) {
+                std::copy_n(
+                    frame.pixels.begin() +
+                        static_cast<std::size_t>(y * frame.width),
+                    frame.width,
+                    upload.begin() +
+                        static_cast<std::size_t>(y * texture_size));
+            }
+            if (!SDL_UpdateTexture(
                 texture,
                 nullptr,
                 upload.data(),
                 texture_size *
                     static_cast<int>(
                         sizeof(oracle::content::RgbaPixel)))) {
-            throw std::runtime_error{
-                std::string{"Vasu texture upload failed: "} +
-                SDL_GetError()};
+                throw std::runtime_error{
+                    std::string{"Vasu texture upload failed: "} +
+                    SDL_GetError()};
+            }
         }
 
         const auto screen_x = static_cast<float>(
@@ -593,8 +624,8 @@ void render_vasu_actors(
 
 void render_octorok_actors(
     SDL_Renderer* renderer,
-    SDL_Texture* texture,
-    const oracle::content::EnemySpriteDecoder& sprite_decoder,
+    const std::array<SDL_Texture*, 8>& textures,
+    const std::array<oracle::content::EnemySpriteFrame, 8>& frames,
     const oracle::gameplay::OctorokRuntime& runtime,
     const oracle::core::ActorSlotDomain& actors,
     const std::vector<RoomPlacement>& rooms,
@@ -603,7 +634,6 @@ void render_octorok_actors(
     const CameraState camera,
     const int output_width,
     const int output_height) {
-    constexpr std::int32_t texture_size = 32;
     const auto player_world_y =
         oracle::gameplay::PlayerTraversal::world_y(player);
     const auto enemy_slots =
@@ -639,36 +669,12 @@ void render_octorok_actors(
         if (!animation.has_value()) {
             continue;
         }
-        const auto frame = sprite_decoder.decode_octorok(
-            *animation,
-            runtime.animation_tick(handle));
-        if (
-            frame.width > texture_size ||
-            frame.height > texture_size) {
-            throw std::runtime_error{
-                "Octorok sprite exceeds its diagnostic texture"};
-        }
-        std::array<oracle::content::RgbaPixel, texture_size * texture_size>
-            upload{};
-        for (std::int32_t y = 0; y < frame.height; ++y) {
-            std::copy_n(
-                frame.pixels.begin() +
-                    static_cast<std::size_t>(y * frame.width),
-                frame.width,
-                upload.begin() +
-                    static_cast<std::size_t>(y * texture_size));
-        }
-        if (!SDL_UpdateTexture(
-                texture,
-                nullptr,
-                upload.data(),
-                texture_size *
-                    static_cast<int>(
-                        sizeof(oracle::content::RgbaPixel)))) {
-            throw std::runtime_error{
-                std::string{"Octorok texture upload failed: "} +
-                SDL_GetError()};
-        }
+        const auto frame_index =
+            static_cast<std::size_t>(*animation) * 2 +
+            static_cast<std::size_t>(
+                (runtime.animation_tick(handle) / 8) & 1u);
+        const auto& frame = frames[frame_index];
+        auto* texture = textures[frame_index];
 
         const auto screen_x = static_cast<float>(
             (world_x - camera.x) * camera.zoom +
@@ -781,8 +787,8 @@ void render_octorok_projectiles(
 
 void render_sword(
     SDL_Renderer* renderer,
-    SDL_Texture* texture,
-    const oracle::content::SwordSpriteDecoder& sprite_decoder,
+    const std::array<SDL_Texture*, 8>& textures,
+    const std::array<oracle::content::SwordSpriteFrame, 8>& frames,
     const oracle::gameplay::SwordStepReport& sword_step,
     const oracle::gameplay::PlayerState& player,
     const CameraState camera,
@@ -791,38 +797,18 @@ void render_sword(
     if (!sword_step.pose.has_value()) {
         return;
     }
-    constexpr std::int32_t texture_size = 32;
     const auto& pose = *sword_step.pose;
-    const auto frame =
-        sprite_decoder.decode(pose.animation_index);
-    std::array<
-        oracle::content::RgbaPixel,
-        texture_size * texture_size> upload{};
-    for (std::int32_t y = 0; y < frame.height; ++y) {
-        std::copy_n(
-            frame.pixels.begin() +
-                static_cast<std::size_t>(y * frame.width),
-            frame.width,
-            upload.begin() +
-                static_cast<std::size_t>(y * texture_size));
-    }
-    if (!SDL_UpdateTexture(
-            texture,
-            nullptr,
-            upload.data(),
-            texture_size *
-                static_cast<int>(
-                    sizeof(oracle::content::RgbaPixel)))) {
-        throw std::runtime_error{
-            std::string{"sword texture upload failed: "} +
-            SDL_GetError()};
-    }
+    const auto frame_index =
+        static_cast<std::size_t>(pose.animation_index);
+    const auto& frame = frames[frame_index];
+    auto* texture = textures[frame_index];
     const auto world_x =
         oracle::gameplay::PlayerTraversal::world_x(player) +
         pose.local_x - player.local_x;
     const auto world_y =
         oracle::gameplay::PlayerTraversal::world_y(player) +
-        pose.local_y - player.local_y;
+        pose.local_y - player.local_y -
+        pose.visual_elevation;
     const SDL_FRect source{
         0.0f,
         0.0f,
@@ -1070,27 +1056,23 @@ RegionPixels compose_region(
 
 std::uint64_t region_animation_signature(
     const oracle::content::RoomPixelDecoder& decoder,
-    const std::vector<RoomPlacement>& placements,
-    const oracle::content::Season season,
+    const RegionPixels& region,
     const std::uint64_t animation_tick) {
     constexpr std::uint64_t signature_prime = 1099511628211ull;
     auto signature = 14695981039346656037ull;
     std::array<std::optional<std::uint64_t>, 256> group_signatures;
-    for (const auto& placement : placements) {
-        const auto tileset = decoder.describe_tileset(
-            static_cast<std::uint8_t>(placement.layout.id.area),
-            static_cast<std::uint8_t>(placement.layout.id.room),
-            season);
+    for (const auto& room : region.rooms) {
+        const auto animation = room.tileset.animation;
         auto& animation_signature =
-            group_signatures[tileset.animation];
+            group_signatures[animation];
         if (!animation_signature.has_value()) {
             animation_signature =
                 decoder.animation_signature(
-                    tileset.animation,
+                    animation,
                     animation_tick);
         }
         signature ^=
-            static_cast<std::uint8_t>(placement.layout.id.room);
+            static_cast<std::uint8_t>(room.id.room);
         signature *= signature_prime;
         signature ^= *animation_signature;
         signature *= signature_prime;
@@ -1737,8 +1719,8 @@ int run_window(
         renderer,
         SDL_PIXELFORMAT_RGBA32,
         SDL_TEXTUREACCESS_STREAMING,
-        16,
-        16);
+        32,
+        32);
     if (link_texture == nullptr) {
         throw std::runtime_error{
             std::string{"Link texture creation failed: "} +
@@ -1746,33 +1728,70 @@ int run_window(
     }
     SDL_SetTextureScaleMode(link_texture, SDL_SCALEMODE_NEAREST);
     SDL_SetTextureBlendMode(link_texture, SDL_BLENDMODE_BLEND);
-    std::optional<std::uint8_t> uploaded_link_frame;
-    SDL_Texture* sword_texture = SDL_CreateTexture(
-        renderer,
-        SDL_PIXELFORMAT_RGBA32,
-        SDL_TEXTUREACCESS_STREAMING,
-        32,
-        32);
-    if (sword_texture == nullptr) {
-        throw std::runtime_error{
-            std::string{"sword texture creation failed: "} +
-            SDL_GetError()};
+    std::optional<oracle::content::LinkSpriteFrame> uploaded_link_frame;
+    std::array<oracle::content::SwordSpriteFrame, 8> sword_frames;
+    std::array<SDL_Texture*, 8> sword_textures{};
+    for (std::size_t index = 0; index < sword_frames.size(); ++index) {
+        auto& frame = sword_frames[index];
+        frame = sword_sprite_decoder.decode(
+            static_cast<std::uint8_t>(index));
+        auto*& texture = sword_textures[index];
+        texture = SDL_CreateTexture(
+            renderer,
+            SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STATIC,
+            frame.width,
+            frame.height);
+        if (
+            texture == nullptr ||
+            !SDL_UpdateTexture(
+                texture,
+                nullptr,
+                frame.pixels.data(),
+                frame.width *
+                    static_cast<int>(
+                        sizeof(oracle::content::RgbaPixel)))) {
+            throw std::runtime_error{
+                std::string{"sword texture creation failed: "} +
+                SDL_GetError()};
+        }
+        SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
     }
-    SDL_SetTextureScaleMode(sword_texture, SDL_SCALEMODE_NEAREST);
-    SDL_SetTextureBlendMode(sword_texture, SDL_BLENDMODE_BLEND);
-    SDL_Texture* octorok_texture = SDL_CreateTexture(
-        renderer,
-        SDL_PIXELFORMAT_RGBA32,
-        SDL_TEXTUREACCESS_STREAMING,
-        32,
-        32);
-    if (octorok_texture == nullptr) {
-        throw std::runtime_error{
-            std::string{"Octorok texture creation failed: "} +
-            SDL_GetError()};
+    std::array<oracle::content::EnemySpriteFrame, 8> octorok_frames;
+    std::array<SDL_Texture*, 8> octorok_textures{};
+    for (std::size_t index = 0; index < octorok_frames.size(); ++index) {
+        const auto direction =
+            static_cast<std::uint8_t>(index / 2);
+        const auto animation_tick =
+            static_cast<std::uint64_t>((index & 1u) * 8);
+        auto& frame = octorok_frames[index];
+        frame = enemy_sprite_decoder.decode_octorok(
+            direction,
+            animation_tick);
+        auto*& texture = octorok_textures[index];
+        texture = SDL_CreateTexture(
+            renderer,
+            SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STATIC,
+            frame.width,
+            frame.height);
+        if (
+            texture == nullptr ||
+            !SDL_UpdateTexture(
+                texture,
+                nullptr,
+                frame.pixels.data(),
+                frame.width *
+                    static_cast<int>(
+                        sizeof(oracle::content::RgbaPixel)))) {
+            throw std::runtime_error{
+                std::string{"Octorok texture creation failed: "} +
+                SDL_GetError()};
+        }
+        SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
     }
-    SDL_SetTextureScaleMode(octorok_texture, SDL_SCALEMODE_NEAREST);
-    SDL_SetTextureBlendMode(octorok_texture, SDL_BLENDMODE_BLEND);
     SDL_Texture* projectile_texture = SDL_CreateTexture(
         renderer,
         SDL_PIXELFORMAT_RGBA32,
@@ -1799,6 +1818,9 @@ int run_window(
         projectile_texture,
         SDL_BLENDMODE_BLEND);
     std::array<SDL_Texture*, 3> vasu_textures{};
+    std::array<
+        std::optional<oracle::content::InteractionSpriteFrame>,
+        3> vasu_frames;
     for (auto*& texture : vasu_textures) {
         texture = SDL_CreateTexture(
             renderer,
@@ -2092,6 +2114,8 @@ int run_window(
     bool object_overlay = force_object_overlay;
     const auto screenshot_ready_tick =
         starting_animation_tick + 2;
+    auto checked_animation_tick =
+        std::numeric_limits<std::uint64_t>::max();
 
     while (running) {
         SDL_Event event{};
@@ -2371,13 +2395,15 @@ int run_window(
         int output_width = 0;
         int output_height = 0;
         SDL_GetRenderOutputSize(renderer, &output_width, &output_height);
-        if (authentic_region.has_value()) {
+        if (
+            authentic_region.has_value() &&
+            checked_animation_tick != logic_tick) {
             const auto signature =
                 region_animation_signature(
                     pixel_decoder,
-                    rooms,
-                    season,
+                    *authentic_region,
                     logic_tick);
+            checked_animation_tick = logic_tick;
             if (signature != authentic_region->animation_signature) {
                 const auto changed = update_animated_rooms(
                     *authentic_region,
@@ -2482,8 +2508,8 @@ int run_window(
         if (player_mode) {
             render_octorok_actors(
                 renderer,
-                octorok_texture,
-                enemy_sprite_decoder,
+                octorok_textures,
+                octorok_frames,
                 octorok_runtime,
                 current_actors,
                 rooms,
@@ -2508,6 +2534,7 @@ int run_window(
                 renderer,
                 vasu_textures,
                 interaction_sprite_decoder,
+                vasu_frames,
                 current_actors,
                 rooms,
                 current_player,
@@ -2516,20 +2543,30 @@ int run_window(
                 render_camera,
                 output_width,
                 output_height);
-            const auto link_frame =
+            const auto desired_link_frame =
                 last_sword_step.pose.has_value()
-                ? link_sprite_decoder.decode_original_frame(
-                      last_sword_step.pose->link_frame)
-                : link_sprite_decoder.decode(
+                ? last_sword_step.pose->link_frame
+                : oracle::content::LinkSpriteDecoder::
+                      select_original_frame(
                       link_direction(current_player.facing),
                       player_moving,
                       logic_tick);
             if (
                 !uploaded_link_frame.has_value() ||
-                *uploaded_link_frame != link_frame.original_frame) {
+                uploaded_link_frame->original_frame !=
+                    desired_link_frame) {
+                auto link_frame =
+                    link_sprite_decoder.decode_original_frame(
+                        desired_link_frame);
+                const SDL_Rect upload_rectangle{
+                    0,
+                    0,
+                    link_frame.width,
+                    link_frame.height,
+                };
                 if (!SDL_UpdateTexture(
                         link_texture,
-                        nullptr,
+                        &upload_rectangle,
                         link_frame.pixels.data(),
                         link_frame.width *
                             static_cast<int>(
@@ -2538,11 +2575,12 @@ int run_window(
                         std::string{"Link texture upload failed: "} +
                         SDL_GetError()};
                 }
-                uploaded_link_frame = link_frame.original_frame;
+                uploaded_link_frame = std::move(link_frame);
             }
             render_player(
                 renderer,
                 link_texture,
+                *uploaded_link_frame,
                 timing.interpolate(
                     oracle::gameplay::PlayerTraversal::world_x(
                         previous_player),
@@ -2558,8 +2596,8 @@ int run_window(
                 output_height);
             render_sword(
                 renderer,
-                sword_texture,
-                sword_sprite_decoder,
+                sword_textures,
+                sword_frames,
                 last_sword_step,
                 current_player,
                 render_camera,
@@ -2567,8 +2605,8 @@ int run_window(
                 output_height);
             render_octorok_actors(
                 renderer,
-                octorok_texture,
-                enemy_sprite_decoder,
+                octorok_textures,
+                octorok_frames,
                 octorok_runtime,
                 current_actors,
                 rooms,
@@ -2593,6 +2631,7 @@ int run_window(
                 renderer,
                 vasu_textures,
                 interaction_sprite_decoder,
+                vasu_frames,
                 current_actors,
                 rooms,
                 current_player,
@@ -2714,8 +2753,12 @@ int run_window(
     }
 
     SDL_DestroyTexture(link_texture);
-    SDL_DestroyTexture(sword_texture);
-    SDL_DestroyTexture(octorok_texture);
+    for (auto* texture : sword_textures) {
+        SDL_DestroyTexture(texture);
+    }
+    for (auto* texture : octorok_textures) {
+        SDL_DestroyTexture(texture);
+    }
     SDL_DestroyTexture(projectile_texture);
     for (auto* texture : vasu_textures) {
         SDL_DestroyTexture(texture);

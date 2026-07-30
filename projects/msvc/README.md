@@ -32,7 +32,10 @@ configuration output directory as the executable.
   view. Use `--explore`, or explicit `--group` and `--room` arguments, to start
   in the original free-roaming room view instead.
 - `OracleRuntimeTests` builds all headless runtime sources and the native test
-  executable. Set it as the startup project and press `Ctrl+F5` to run it.
+  executable. It remains in the solution but is excluded from **Build
+  Solution** so the same engine sources are not compiled twice during normal
+  gameplay iteration. Right-click it and choose **Build**, then set it as the
+  startup project and press `Ctrl+F5`, when you want to run the native suite.
 - `SDL3` is the unmodified project from the ignored SDL checkout.
 
 To test Seasons, open `OracleRoomSlice` properties and replace the command

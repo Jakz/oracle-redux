@@ -119,7 +119,7 @@ SpritePalettes load_sprite_palettes(
     return palettes;
 }
 
-std::uint8_t animation_oam_index(
+std::uint8_t select_vasu_oam_index_impl(
     const std::uint8_t subid,
     const std::uint64_t tick) {
     if (subid == 0) {
@@ -198,12 +198,18 @@ InteractionSpriteDecoder::InteractionSpriteDecoder(
     const RomSource& rom)
     : rom_{rom} {}
 
+std::uint8_t InteractionSpriteDecoder::select_vasu_oam_index(
+    const std::uint8_t subid,
+    const std::uint64_t animation_tick) {
+    return select_vasu_oam_index_impl(subid, animation_tick);
+}
+
 InteractionSpriteFrame InteractionSpriteDecoder::decode_vasu(
     const std::uint8_t subid,
     const std::uint64_t animation_tick) const {
     const auto offsets = offsets_for(rom_.metadata().campaign);
     const auto oam_index =
-        animation_oam_index(subid, animation_tick);
+        select_vasu_oam_index_impl(subid, animation_tick);
     const auto objects = load_oam(rom_, offsets, oam_index);
     if (objects.empty()) {
         throw std::runtime_error{"Vasu frame has no OAM objects"};

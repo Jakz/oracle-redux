@@ -202,6 +202,7 @@ SwordStepReport SwordRuntime::update(
         .room = player.room,
         .local_x = center_x,
         .local_y = center_y,
+        .visual_elevation = 2.0,
         .arc_index = arc_index,
         .animation_index = item_animation,
         .link_frame =

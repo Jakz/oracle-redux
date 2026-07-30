@@ -17,6 +17,8 @@ enum class LinkDirection : std::uint8_t {
 
 struct LinkSpriteFrame {
     std::uint8_t original_frame{};
+    std::int32_t origin_x{-8};
+    std::int32_t origin_y{-8};
     std::int32_t width{16};
     std::int32_t height{16};
     std::vector<RgbaPixel> pixels;
@@ -33,6 +35,11 @@ public:
         LinkDirection direction,
         bool moving,
         std::uint64_t animation_tick) const;
+
+    [[nodiscard]] static std::uint8_t select_original_frame(
+        LinkDirection direction,
+        bool moving,
+        std::uint64_t animation_tick);
 
     // Decodes a frame index already selected by a retail Link animation.
     [[nodiscard]] LinkSpriteFrame decode_original_frame(

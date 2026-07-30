@@ -30,6 +30,10 @@ public:
         std::uint8_t subid,
         std::uint64_t animation_tick) const;
 
+    [[nodiscard]] static std::uint8_t select_vasu_oam_index(
+        std::uint8_t subid,
+        std::uint64_t animation_tick);
+
 private:
     const RomSource& rom_;
 };

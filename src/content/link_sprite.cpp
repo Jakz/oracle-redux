@@ -1,8 +1,10 @@
 #include "oracle/content/link_sprite.h"
 
 #include <array>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -138,6 +140,14 @@ LinkSpriteFrame LinkSpriteDecoder::decode(
     const LinkDirection direction,
     const bool moving,
     const std::uint64_t animation_tick) const {
+    return decode_original_frame(
+        select_original_frame(direction, moving, animation_tick));
+}
+
+std::uint8_t LinkSpriteDecoder::select_original_frame(
+    const LinkDirection direction,
+    const bool moving,
+    const std::uint64_t animation_tick) {
     const auto direction_index =
         static_cast<std::uint8_t>(direction);
     if (direction_index > 3) {
@@ -150,9 +160,7 @@ LinkSpriteFrame LinkSpriteDecoder::decode(
         moving && walking_phase != 0
         ? walking_frame_b_base
         : walking_frame_a_base;
-    const auto frame_index =
-        static_cast<std::uint8_t>(frame_base + direction_index);
-    return decode_original_frame(frame_index);
+    return static_cast<std::uint8_t>(frame_base + direction_index);
 }
 
 LinkSpriteFrame LinkSpriteDecoder::decode_original_frame(
@@ -189,31 +197,63 @@ LinkSpriteFrame LinkSpriteDecoder::decode_original_frame(
     const auto object_count = rom_.read_byte(oam++);
     const auto palettes = load_sprite_palettes(rom_, offsets);
 
-    LinkSpriteFrame frame{
-        .original_frame = frame_index,
-        .pixels =
-            std::vector<RgbaPixel>(
-                16 * 16,
-                RgbaPixel{.alpha = 0}),
+    struct OamObject {
+        std::int32_t y{};
+        std::int32_t x{};
+        std::uint8_t tile{};
+        std::uint8_t flags{};
     };
+    std::vector<OamObject> objects;
+    objects.reserve(object_count);
+    auto minimum_x = std::numeric_limits<std::int32_t>::max();
+    auto minimum_y = std::numeric_limits<std::int32_t>::max();
+    auto maximum_x = std::numeric_limits<std::int32_t>::min();
+    auto maximum_y = std::numeric_limits<std::int32_t>::min();
     for (std::uint8_t object = 0; object < object_count; ++object) {
         const auto y_offset = signed_offset(rom_.read_byte(oam));
         const auto x_offset = signed_offset(rom_.read_byte(oam + 1));
-        const auto tile =
-            static_cast<std::size_t>(rom_.read_byte(oam + 2) & 0xfe);
-        const auto flags = rom_.read_byte(oam + 3);
+        objects.push_back(
+            OamObject{
+                .y = y_offset,
+                .x = x_offset,
+                .tile =
+                    static_cast<std::uint8_t>(
+                        rom_.read_byte(oam + 2) & 0xfe),
+                .flags = rom_.read_byte(oam + 3),
+            });
         oam += 4;
-        const bool flip_x = (flags & 0x20) != 0;
-        const bool flip_y = (flags & 0x40) != 0;
+        minimum_x = std::min(minimum_x, x_offset - 8);
+        minimum_y = std::min(minimum_y, y_offset - 16);
+        maximum_x = std::max(maximum_x, x_offset);
+        maximum_y = std::max(maximum_y, y_offset);
+    }
+    if (objects.empty()) {
+        throw std::runtime_error{"Link frame contains no OAM objects"};
+    }
+
+    LinkSpriteFrame frame{
+        .original_frame = frame_index,
+        .origin_x = minimum_x,
+        .origin_y = minimum_y,
+        .width = maximum_x - minimum_x,
+        .height = maximum_y - minimum_y,
+    };
+    frame.pixels.assign(
+        static_cast<std::size_t>(frame.width * frame.height),
+        RgbaPixel{.alpha = 0});
+    for (const auto& object : objects) {
+        const bool flip_x = (object.flags & 0x20) != 0;
+        const bool flip_y = (object.flags & 0x40) != 0;
         const auto palette =
-            static_cast<std::size_t>(flags & 0x07);
+            static_cast<std::size_t>(object.flags & 0x07);
 
         for (std::size_t destination_y = 0;
              destination_y < 16;
              ++destination_y) {
             const auto source_y =
                 flip_y ? 15 - destination_y : destination_y;
-            const auto source_tile = tile + source_y / 8;
+            const auto source_tile =
+                static_cast<std::size_t>(object.tile) + source_y / 8;
             const auto tile_y = source_y & 7u;
             for (std::size_t destination_x = 0;
                  destination_x < 8;
@@ -230,18 +270,13 @@ LinkSpriteFrame LinkSpriteDecoder::decode_original_frame(
                     continue;
                 }
                 const auto frame_x =
-                    x_offset +
-                    static_cast<std::int32_t>(destination_x);
+                    object.x - 8 +
+                    static_cast<std::int32_t>(destination_x) -
+                    minimum_x;
                 const auto frame_y =
-                    y_offset - 8 +
-                    static_cast<std::int32_t>(destination_y);
-                if (
-                    frame_x < 0 ||
-                    frame_y < 0 ||
-                    frame_x >= frame.width ||
-                    frame_y >= frame.height) {
-                    continue;
-                }
+                    object.y - 16 +
+                    static_cast<std::int32_t>(destination_y) -
+                    minimum_y;
                 auto& pixel =
                     frame.pixels[
                         static_cast<std::size_t>(frame_y * frame.width) +
