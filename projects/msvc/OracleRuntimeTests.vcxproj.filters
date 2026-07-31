@@ -177,6 +177,12 @@
     <ClInclude Include="$(OracleRoot)include\oracle\gameplay\player_traversal.h">
       <Filter>Public Headers\Gameplay\Player</Filter>
     </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\player_combat_state.h">
+      <Filter>Public Headers\Gameplay\Player</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\player_hazard_runtime.h">
+      <Filter>Public Headers\Gameplay\Player</Filter>
+    </ClInclude>
     <ClInclude Include="$(OracleRoot)include\oracle\presentation\camera.h">
       <Filter>Public Headers\Presentation\Camera</Filter>
     </ClInclude>

@@ -78,6 +78,7 @@ add_library(oracle_gameplay
     src/gameplay/interactions/vasu_interaction.cpp
     src/gameplay/items/chest_runtime.cpp
     src/gameplay/items/feather_runtime.cpp
+    src/gameplay/player/player_hazard_runtime.cpp
     src/gameplay/player/player_traversal.cpp
 )
 target_include_directories(oracle_gameplay PUBLIC include)

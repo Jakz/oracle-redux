@@ -34,6 +34,8 @@ struct PlayerState {
     std::int32_t z_subpixels{};
     std::int32_t speed_z_subpixels{};
     std::uint8_t in_air{};
+    // Mirrors the high collision-enable bit on Link's retail object.
+    bool object_contact_enabled{true};
 };
 
 struct MovementInput {

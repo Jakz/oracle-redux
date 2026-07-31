@@ -94,6 +94,7 @@ bool overlaps_player(
     const core::ActorSlotState& actor,
     const PlayerState& player) noexcept {
     if (
+        !player.object_contact_enabled ||
         !shares_actor_space(actor.room, player.room) ||
         !object_z_contact(player.z_subpixels, 0)) {
         return false;

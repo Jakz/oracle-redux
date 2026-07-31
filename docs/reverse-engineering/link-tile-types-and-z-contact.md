@@ -41,11 +41,11 @@ Consequently, the active metatile is sampled at Link X and Link Y plus five
 pixels. This is independent of the eight asymmetric probes used for wall
 collision. `RoomTileTypeDecoder::sample_link_feet` preserves that boundary.
 
-The SDL slice now shows the decoded active type on its status line. When the
-Feather lands, the diagnostic line records the landing type. The current
-checkpoint exposes an authoritative landing result but deliberately does not
-yet pretend to implement fall, swim, drown, lava damage, ice, or conveyor
-state machines.
+The SDL slice shows the decoded active type on its status line. When the
+Feather lands, the diagnostic line records the landing type. Ordinary holes
+now consume the typed contact through the state machine documented in
+`hole-fall-and-respawn.md`; swim, drown, lava, ice, and conveyor reactions
+remain separate policies.
 
 ## Z-aware object contact
 

@@ -83,6 +83,17 @@ std::optional<LinkTileType> RoomTileTypeDecoder::sample_link_feet(
     const RoomTileTypeMap& types,
     const double local_x,
     const double local_y) noexcept {
+    const auto contact = sample_link_contact(types, local_x, local_y);
+    return contact.has_value()
+        ? std::optional<LinkTileType>{contact->type}
+        : std::nullopt;
+}
+
+std::optional<LinkTileContact>
+RoomTileTypeDecoder::sample_link_contact(
+    const RoomTileTypeMap& types,
+    const double local_x,
+    const double local_y) noexcept {
     if (local_x < 0.0 || local_y + active_tile_y_offset < 0.0) {
         return std::nullopt;
     }
@@ -94,7 +105,12 @@ std::optional<LinkTileType> RoomTileTypeDecoder::sample_link_feet(
     if (column >= types.columns || row >= types.rows) {
         return std::nullopt;
     }
-    return types.values[row * types.columns + column];
+    return LinkTileContact{
+        .room = types.id,
+        .type = types.values[row * types.columns + column],
+        .column = column,
+        .row = row,
+    };
 }
 
 std::string_view link_tile_type_name(const LinkTileType type) noexcept {

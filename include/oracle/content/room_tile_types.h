@@ -56,6 +56,13 @@ struct RoomTileTypeMap {
         std::size_t row) const;
 };
 
+struct LinkTileContact {
+    core::WorldRoomId room;
+    LinkTileType type{LinkTileType::normal};
+    std::size_t column{};
+    std::size_t row{};
+};
+
 class RoomTileTypeDecoder {
 public:
     explicit RoomTileTypeDecoder(const RomSource& rom);
@@ -70,6 +77,12 @@ public:
     // Recreates @linkGetActiveTileType's objectGetRelativeTile($0500):
     // Link's active metatile is sampled five pixels below his origin.
     [[nodiscard]] static std::optional<LinkTileType> sample_link_feet(
+        const RoomTileTypeMap& types,
+        double local_x,
+        double local_y) noexcept;
+
+    [[nodiscard]] static std::optional<LinkTileContact>
+    sample_link_contact(
         const RoomTileTypeMap& types,
         double local_x,
         double local_y) noexcept;

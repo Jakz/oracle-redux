@@ -9,6 +9,7 @@
 #include "oracle/content/part_data.h"
 #include "oracle/content/room_collisions.h"
 #include "oracle/core/actor_slot_domain.h"
+#include "oracle/gameplay/player_combat_state.h"
 #include "oracle/gameplay/player_traversal.h"
 #include "oracle/gameplay/sword_runtime.h"
 
@@ -45,13 +46,6 @@ struct OctorokAftermathVisual {
     std::uint8_t oam_index{};
     double elevation{};
     bool visible{true};
-};
-
-struct PlayerCombatState {
-    std::uint8_t maximum_health{12};
-    std::uint8_t health{12};
-    std::uint8_t invincibility_ticks{};
-    std::uint16_t rupees{};
 };
 
 struct OctorokStepReport {

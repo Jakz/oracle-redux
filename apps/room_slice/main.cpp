@@ -39,6 +39,7 @@
 #include "oracle/core/actor_slot_domain.h"
 #include "oracle/gameplay/chest_runtime.h"
 #include "oracle/gameplay/feather_runtime.h"
+#include "oracle/gameplay/player_hazard_runtime.h"
 #include "oracle/gameplay/player_traversal.h"
 #include "oracle/gameplay/octorok_runtime.h"
 #include "oracle/gameplay/room_actor_loader.h"
@@ -2268,8 +2269,8 @@ int run_window(
         return result;
     };
     auto room_tile_types = decode_room_tile_types();
-    const auto active_link_tile_type = [&]()
-        -> std::optional<oracle::content::LinkTileType> {
+    const auto active_link_tile_contact = [&]()
+        -> std::optional<oracle::content::LinkTileContact> {
         const auto found = std::find_if(
             room_tile_types.begin(),
             room_tile_types.end(),
@@ -2279,12 +2280,22 @@ int run_window(
         if (found == room_tile_types.end()) {
             return std::nullopt;
         }
-        return oracle::content::RoomTileTypeDecoder::sample_link_feet(
+        return oracle::content::RoomTileTypeDecoder::sample_link_contact(
             *found,
             current_player.local_x,
             current_player.local_y);
     };
+    const auto active_link_tile_type = [&]()
+        -> std::optional<oracle::content::LinkTileType> {
+        const auto contact = active_link_tile_contact();
+        return contact.has_value()
+            ? std::optional<oracle::content::LinkTileType>{contact->type}
+            : std::nullopt;
+    };
     oracle::gameplay::PlayerCombatState player_combat;
+    oracle::gameplay::PlayerHazardRuntime player_hazard_runtime;
+    player_hazard_runtime.reset(current_player);
+    oracle::gameplay::PlayerHazardStepReport last_hazard_step;
     oracle::gameplay::OctorokStepReport last_combat_step;
     oracle::gameplay::ChestStepReport last_chest_step;
     oracle::gameplay::SwordStepReport last_sword_step;
@@ -2472,6 +2483,7 @@ int run_window(
             }
             previous_player = current_player;
             initial_player = current_player;
+            player_hazard_runtime.set_respawn_point(current_player);
             reload_current_objects();
             current.x =
                 oracle::gameplay::PlayerTraversal::world_x(
@@ -2578,6 +2590,7 @@ int run_window(
                 seed_chest_room_flags();
                 sword_runtime.reset();
                 feather_runtime.reset();
+                player_hazard_runtime.reset(current_player);
                 player_combat =
                     oracle::gameplay::PlayerCombatState{};
                 last_combat_step =
@@ -2588,6 +2601,8 @@ int run_window(
                     oracle::gameplay::SwordStepReport{};
                 last_feather_step =
                     oracle::gameplay::FeatherStepReport{};
+                last_hazard_step =
+                    oracle::gameplay::PlayerHazardStepReport{};
                 last_feather_landing_type.reset();
             } else if (
                 event.type == SDL_EVENT_KEY_DOWN &&
@@ -2633,12 +2648,17 @@ int run_window(
                 (input_frame.held(
                      oracle::input::InputAction::up) ? 1.0 : 0.0);
             if (player_mode) {
+                const auto hazard_captures_input =
+                    player_hazard_runtime.captures_input();
                 vasu_runtime.update(
-                    input_frame,
+                    hazard_captures_input
+                        ? oracle::input::InputFrame{}
+                        : input_frame,
                     current_player,
                     current_actors);
                 const auto gameplay_input =
-                    vasu_runtime.captures_input()
+                    (vasu_runtime.captures_input() ||
+                     hazard_captures_input)
                     ? oracle::input::InputFrame{}
                     : input_frame;
                 const auto chest_step = chest_runtime.update(
@@ -2688,12 +2708,14 @@ int run_window(
                             .horizontal =
                                 (
                                     vasu_runtime.captures_input() ||
+                                    hazard_captures_input ||
                                     last_sword_step.pose.has_value())
                                 ? 0.0
                                 : horizontal,
                             .vertical =
                                 (
                                     vasu_runtime.captures_input() ||
+                                    hazard_captures_input ||
                                     last_sword_step.pose.has_value())
                                 ? 0.0
                                 : vertical,
@@ -2704,7 +2726,23 @@ int run_window(
                 player_moving = traversal.moved;
                 if (traversal.crossed_room_seam) {
                     reload_current_objects();
+                    player_hazard_runtime.set_respawn_point(
+                        current_player);
                 }
+                last_hazard_step = player_hazard_runtime.update(
+                    current_player,
+                    player_combat,
+                    active_link_tile_contact(),
+                    last_feather_step.landed);
+                if (last_hazard_step.began_fall) {
+                    sword_runtime.reset();
+                    last_sword_step =
+                        oracle::gameplay::SwordStepReport{};
+                }
+                player_moving =
+                    player_moving &&
+                    last_hazard_step.phase ==
+                        oracle::gameplay::PlayerHazardPhase::normal;
                 warp_cooldown =
                     std::max(0.0, warp_cooldown - logic_step);
 
@@ -2758,6 +2796,8 @@ int run_window(
                         current_packed_position;
                 if (
                     !warp.has_value() &&
+                    player_hazard_runtime.phase() ==
+                        oracle::gameplay::PlayerHazardPhase::normal &&
                     warp_cooldown == 0.0 &&
                     !standing_on_deactivated_warp) {
                     const auto local_column = static_cast<std::size_t>(
@@ -3012,7 +3052,9 @@ int run_window(
                 output_width,
                 output_height);
             const auto desired_link_frame =
-                last_sword_step.pose.has_value()
+                last_hazard_step.link_frame.has_value()
+                ? *last_hazard_step.link_frame
+                : last_sword_step.pose.has_value()
                 ? last_sword_step.pose->link_frame
                 : last_feather_step.link_frame.has_value()
                 ? *last_feather_step.link_frame
@@ -3047,37 +3089,39 @@ int run_window(
                 }
                 uploaded_link_frame = std::move(link_frame);
             }
-            render_player(
-                renderer,
-                link_texture,
-                *uploaded_link_frame,
-                timing.interpolate(
-                    oracle::gameplay::PlayerTraversal::world_x(
-                        previous_player),
-                    oracle::gameplay::PlayerTraversal::world_x(
-                        current_player)),
-                timing.interpolate(
-                    oracle::gameplay::PlayerTraversal::world_y(
-                        previous_player),
-                    oracle::gameplay::PlayerTraversal::world_y(
-                        current_player)),
-                timing.interpolate(
-                    oracle::gameplay::FeatherRuntime::visual_elevation(
-                        previous_player),
-                    oracle::gameplay::FeatherRuntime::visual_elevation(
-                        current_player)),
-                render_camera,
-                output_width,
-                output_height);
-            render_sword(
-                renderer,
-                sword_textures,
-                sword_frames,
-                last_sword_step,
-                current_player,
-                render_camera,
-                output_width,
-                output_height);
+            if (player_hazard_runtime.visible()) {
+                render_player(
+                    renderer,
+                    link_texture,
+                    *uploaded_link_frame,
+                    timing.interpolate(
+                        oracle::gameplay::PlayerTraversal::world_x(
+                            previous_player),
+                        oracle::gameplay::PlayerTraversal::world_x(
+                            current_player)),
+                    timing.interpolate(
+                        oracle::gameplay::PlayerTraversal::world_y(
+                            previous_player),
+                        oracle::gameplay::PlayerTraversal::world_y(
+                            current_player)),
+                    timing.interpolate(
+                        oracle::gameplay::FeatherRuntime::visual_elevation(
+                            previous_player),
+                        oracle::gameplay::FeatherRuntime::visual_elevation(
+                            current_player)),
+                    render_camera,
+                    output_width,
+                    output_height);
+                render_sword(
+                    renderer,
+                    sword_textures,
+                    sword_frames,
+                    last_sword_step,
+                    current_player,
+                    render_camera,
+                    output_width,
+                    output_height);
+            }
             render_octorok_actors(
                 renderer,
                 octorok_textures,
@@ -3166,6 +3210,17 @@ int run_window(
             << player_combat.rupees
             << " | FPS " << std::fixed << std::setprecision(1)
             << measured_fps;
+        if (
+            last_hazard_step.phase !=
+            oracle::gameplay::PlayerHazardPhase::normal) {
+            diagnostic_line
+                << " | hazard "
+                << oracle::gameplay::player_hazard_phase_name(
+                       last_hazard_step.phase)
+                << " #"
+                << static_cast<unsigned int>(
+                       last_hazard_step.standing_on_tile_counter);
+        }
         if (
             (chest_runtime.room_flags(current_player.room) &
              oracle::content::room_flag_item) != 0) {

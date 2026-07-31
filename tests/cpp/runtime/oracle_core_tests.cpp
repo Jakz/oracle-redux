@@ -37,6 +37,7 @@
 #include "oracle/gameplay/interaction_target.h"
 #include "oracle/gameplay/object_contact.h"
 #include "oracle/gameplay/octorok_runtime.h"
+#include "oracle/gameplay/player_hazard_runtime.h"
 #include "oracle/gameplay/player_traversal.h"
 #include "oracle/gameplay/room_actor_loader.h"
 #include "oracle/gameplay/sword_runtime.h"
@@ -577,6 +578,134 @@ void test_feather_runtime() {
         "occupied original parent slot prevents feather activation");
 }
 
+void test_player_hole_hazard() {
+    using oracle::content::LinkTileContact;
+    using oracle::content::LinkTileType;
+    using oracle::core::WorldRoomId;
+    using oracle::gameplay::PlayerCombatState;
+    using oracle::gameplay::PlayerFacing;
+    using oracle::gameplay::PlayerHazardPhase;
+    using oracle::gameplay::PlayerHazardRuntime;
+    using oracle::gameplay::PlayerState;
+
+    const auto room = WorldRoomId{.area = 2, .room = 0x44};
+    const auto respawn = PlayerState{
+        .room = room,
+        .local_x = 88.0,
+        .local_y = 72.0,
+        .facing = PlayerFacing::west,
+    };
+    auto player = PlayerState{
+        .room = room,
+        .local_x = 32.0,
+        .local_y = 48.0,
+    };
+    const auto hole = LinkTileContact{
+        .room = room,
+        .type = LinkTileType::hole,
+        .column = 2,
+        .row = 3,
+    };
+    PlayerCombatState combat;
+    PlayerHazardRuntime runtime;
+    runtime.reset(respawn);
+
+    auto step = runtime.update(player, combat, hole);
+    check(step.entered_hole, "hole contact enters retail pull state");
+    check_close(
+        player.local_x,
+        33.0,
+        "hole counter phase one pulls horizontally");
+    step = runtime.update(player, combat, hole);
+    step = runtime.update(player, combat, hole);
+    step = runtime.update(player, combat, hole);
+    check_close(
+        player.local_y,
+        49.0,
+        "hole counter phase zero pulls vertically");
+
+    std::size_t pull_ticks = 4;
+    while (
+        runtime.phase() == PlayerHazardPhase::hole_pull &&
+        pull_ticks < 100) {
+        step = runtime.update(player, combat, hole);
+        ++pull_ticks;
+    }
+    check(
+        runtime.phase() == PlayerHazardPhase::hole_fall,
+        "alternating hole pull reaches the metatile center");
+    check(step.began_fall, "centering emits the fall transition");
+    check(
+        !step.link_frame.has_value(),
+        "fall state changes before its next-tick animation initialization");
+    check(
+        !player.object_contact_enabled,
+        "falling disables object contact like retail collisionType bit 7");
+
+    step = runtime.update(player, combat, hole);
+    check(step.link_frame == 0x08, "hole fall initializes ROM frame 08");
+    check_close(player.local_x, 40.0, "fall initialization centers Link X");
+    check_close(player.local_y, 56.0, "fall initialization centers Link Y");
+
+    std::size_t fall_ticks = 0;
+    while (
+        runtime.phase() == PlayerHazardPhase::hole_fall &&
+        fall_ticks < 100) {
+        step = runtime.update(player, combat, hole);
+        ++fall_ticks;
+        if (fall_ticks == 16) {
+            check(
+                step.link_frame == 0x09,
+                "fall frame 09 begins after sixteen ticks");
+        }
+        if (fall_ticks == 26) {
+            check(
+                step.link_frame == 0x0a,
+                "fall frame 0A begins after another ten ticks");
+        }
+    }
+    check(fall_ticks == 36, "ROM fall animation lasts 16+10+10 ticks");
+    check(
+        runtime.phase() == PlayerHazardPhase::hidden_respawn_delay &&
+            !runtime.visible(),
+        "completed fall teleports to a hidden two-tick respawn");
+    check_close(player.local_x, respawn.local_x, "hole restores respawn X");
+    check_close(player.local_y, respawn.local_y, "hole restores respawn Y");
+    check(
+        player.facing == respawn.facing,
+        "hole restores the saved local respawn direction");
+
+    step = runtime.update(player, combat, std::nullopt);
+    step = runtime.update(player, combat, std::nullopt);
+    check(step.damaged, "second hidden tick applies hole damage");
+    check(combat.health == 8, "ordinary hole removes one full heart");
+    check(
+        combat.invincibility_ticks == 0x3c,
+        "hole respawn grants retail 60-tick invincibility");
+    check(runtime.visible(), "Link reappears when hole damage is applied");
+
+    for (std::size_t tick = 0; tick < 16; ++tick) {
+        step = runtime.update(player, combat, std::nullopt);
+    }
+    check(step.recovered, "hole recovery completes after sixteen ticks");
+    check(
+        runtime.phase() == PlayerHazardPhase::normal &&
+            player.object_contact_enabled,
+        "hole recovery restores normal input and object contact");
+
+    player = PlayerState{
+        .room = room,
+        .local_x = 40.0,
+        .local_y = 56.0,
+        .in_air = 1,
+    };
+    runtime.reset(respawn);
+    step = runtime.update(player, combat, hole);
+    check(
+        step.phase == PlayerHazardPhase::normal,
+        "airborne Link ignores top-down hole terrain");
+}
+
 void test_room_tile_types(
     const std::filesystem::path& path,
     const oracle::core::Campaign campaign) {
@@ -645,6 +774,17 @@ void test_room_tile_types(
             8.0,
             11.0) == LinkTileType::hole,
         "active tile crosses at Link's original five-pixel foot sample");
+    const auto contact = RoomTileTypeDecoder::sample_link_contact(
+        foot_sample,
+        8.0,
+        11.0);
+    check(
+        contact.has_value() &&
+            contact->room == foot_sample.id &&
+            contact->column == 0 &&
+            contact->row == 1 &&
+            contact->type == LinkTileType::hole,
+        "active Link contact retains room and metatile identity");
 }
 
 void test_object_z_contact() {
@@ -2495,6 +2635,7 @@ int main() {
     test_spatial_room_seams();
     test_player_traversal();
     test_feather_runtime();
+    test_player_hole_hazard();
     test_object_z_contact();
     test_room_tile_types(
         "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",

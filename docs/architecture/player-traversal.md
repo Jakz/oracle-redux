@@ -66,10 +66,12 @@ Large elapsed movements are split into steps no larger than one pixel to
 prevent tunneling, and ordinary `SPEED_100` traversal advances one cardinal
 pixel per 60 Hz logic tick.
 
-This slice implements ordinary grounded, hole-permitting Link collision.
-Raised-floor handling and the collision policy changes associated with jump,
-swim, fall, and hazard states remain explicit future gameplay states rather
-than presentation shortcuts.
+Terrain traversal remains responsible for enterability, while
+`PlayerHazardRuntime` consumes the typed terrain contact after movement.
+Ordinary holes disable the separate object-contact channel during fall and
+recovery without turning the terrain wall probes into a hazard state machine.
+Raised-floor, swimming, lava, and other policy changes remain explicit future
+gameplay states rather than presentation shortcuts.
 
 ## Seam crossing
 
@@ -99,6 +101,7 @@ Current controls:
 - `F2` toggles the collision overlay;
 - `F3` toggles unresolved room-object spawn anchors.
 
-Standing and ordinary walking now select original Link graphics frames by
-facing direction. Full animation state, elevation, hazards, object
-interaction, and attacks remain separate future slices.
+Standing, walking, Feather, sword, and ordinary hole falling select original
+Link graphics frames. The room slice hides Link during the retail local
+respawn delay, but gameplay owns that visibility decision; the renderer only
+consumes it.
