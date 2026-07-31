@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <stdexcept>
 
@@ -12,8 +13,36 @@
 namespace oracle::gameplay {
 namespace {
 
-constexpr double collision_epsilon = 0.001;
 constexpr double maximum_movement_substep = 1.0;
+constexpr double full_turn_radians = 6.28318530717958647692;
+
+// Cumulative result of the delta-encoded @overworldOffsets table consumed by
+// calculateAdjacentWallsBitset. The order is significant: the first probe is
+// returned in bit 7 and the final probe in bit 0.
+constexpr std::array<std::array<double, 2>, 8> terrain_probe_offsets{{
+    {{-3.0, -3.0}},
+    {{2.0, -3.0}},
+    {{-3.0, 7.0}},
+    {{2.0, 7.0}},
+    {{-5.0, 0.0}},
+    {{-5.0, 5.0}},
+    {{4.0, 0.0}},
+    {{4.0, 5.0}},
+}};
+
+constexpr std::array<std::uint8_t, 32> bits_to_check{{
+    0xcf, 0xc3, 0xc3, 0xc3, 0xc3, 0xc3, 0xc3, 0xc3,
+    0xf3, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33,
+    0x3f, 0x3c, 0x3c, 0x3c, 0x3c, 0x3c, 0x3c, 0x3c,
+    0xfc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
+}};
+
+constexpr std::array<std::uint8_t, 32> slide_angle_table{{
+    0x80, 0x80, 0x01, 0x02, 0x02, 0x02, 0x03, 0x24,
+    0x24, 0x24, 0x05, 0x06, 0x06, 0x06, 0x07, 0x48,
+    0x48, 0x48, 0x09, 0x0a, 0x0a, 0x0a, 0x0b, 0x1c,
+    0x1c, 0x1c, 0x0d, 0x0e, 0x0e, 0x0e, 0x0f, 0x80,
+}};
 
 struct CollisionSample {
     core::WorldRoomId room;
@@ -185,6 +214,81 @@ bool sample_is_clear(
         local_y);
 }
 
+std::uint8_t collect_adjacent_walls(
+    const PlayerState& player,
+    const CollisionLookup& collision_lookup) {
+    std::uint8_t walls{};
+    for (std::size_t index = 0; index < terrain_probe_offsets.size(); ++index) {
+        const auto& offset = terrain_probe_offsets[index];
+        if (!sample_is_clear(
+                CollisionSample{
+                    player.room,
+                    player.local_x + offset[0],
+                    player.local_y + offset[1],
+                },
+                collision_lookup)) {
+            walls = static_cast<std::uint8_t>(
+                walls | (0x80u >> index));
+        }
+    }
+    return walls;
+}
+
+std::uint8_t movement_angle(const MovementInput input) noexcept {
+    auto radians = std::atan2(input.horizontal, -input.vertical);
+    if (radians < 0.0) {
+        radians += full_turn_radians;
+    }
+    return static_cast<std::uint8_t>(
+        static_cast<int>(
+            std::lround(radians * 32.0 / full_turn_radians)) &
+        0x1f);
+}
+
+std::optional<std::uint8_t> tile_edge_adjust(
+    const std::uint8_t angle,
+    const std::uint8_t walls) noexcept {
+    const auto slide = slide_angle_table[angle & 0x1f];
+    if ((slide & 0x03) != 0) {
+        return std::nullopt;
+    }
+
+    if ((slide & 0x80) != 0) {
+        if ((walls & 0xc3) == 0x80) {
+            return std::uint8_t{0x08};
+        }
+        if ((walls & 0xcc) == 0x40) {
+            return std::uint8_t{0x18};
+        }
+        return std::nullopt;
+    }
+    if ((slide & 0x40) != 0) {
+        if ((walls & 0x33) == 0x20) {
+            return std::uint8_t{0x08};
+        }
+        if ((walls & 0x3c) == 0x10) {
+            return std::uint8_t{0x18};
+        }
+        return std::nullopt;
+    }
+    if ((slide & 0x20) != 0) {
+        if ((walls & 0xc3) == 0x01) {
+            return std::uint8_t{0x00};
+        }
+        if ((walls & 0x33) == 0x02) {
+            return std::uint8_t{0x10};
+        }
+        return std::nullopt;
+    }
+    if ((walls & 0xcc) == 0x04) {
+        return std::uint8_t{0x00};
+    }
+    if ((walls & 0x3c) == 0x08) {
+        return std::uint8_t{0x10};
+    }
+    return std::nullopt;
+}
+
 void canonicalize_player(PlayerState& player) {
     if (player.room.area >= 4) {
         return;
@@ -262,11 +366,10 @@ bool resolve_actor_overlaps(
     return contacted;
 }
 
-bool move_axis(
+bool move_actor_checked_axis(
     PlayerState& player,
     const double amount,
     const bool horizontal,
-    const CollisionLookup& collision_lookup,
     const std::span<const ActorCollisionBody> actor_bodies,
     const PlayerBody body,
     bool& contacted_actor) {
@@ -279,11 +382,7 @@ bool move_axis(
     } else {
         candidate.local_y += amount;
     }
-    if (!PlayerTraversal::can_occupy(
-            candidate,
-            collision_lookup,
-            actor_bodies,
-            body)) {
+    if (overlaps_any_actor(candidate, actor_bodies, body)) {
         contacted_actor =
             contacted_actor ||
             overlaps_any_actor(candidate, actor_bodies, body);
@@ -307,8 +406,6 @@ TraversalStep PlayerTraversal::step(
     if (
         elapsed_seconds < 0.0 ||
         speed_pixels_per_second < 0.0 ||
-        body.half_width <= 0.0 ||
-        body.half_height <= 0.0 ||
         body.actor_collision_radius_x <= 0.0 ||
         body.actor_collision_radius_y <= 0.0) {
         throw std::invalid_argument{
@@ -340,31 +437,61 @@ TraversalStep PlayerTraversal::step(
         resolve_actor_overlaps(player, actor_bodies, body);
     result.moved = result.contacted_actor;
     result.blocked = result.contacted_actor;
-    const auto distance = speed_pixels_per_second * elapsed_seconds;
+    const auto movement_magnitude = std::min(input_length, 1.0);
+    const auto distance =
+        speed_pixels_per_second * elapsed_seconds * movement_magnitude;
+    if (distance == 0.0) {
+        result.crossed_room_seam =
+            !same_room(result.previous_room, player.room);
+        return result;
+    }
     const auto substeps = std::max(
         1,
         static_cast<int>(
             std::ceil(distance / maximum_movement_substep)));
-    const auto horizontal_step =
-        input.horizontal * distance / substeps;
-    const auto vertical_step =
-        input.vertical * distance / substeps;
+    const auto requested_angle = movement_angle(input);
     for (int index = 0; index < substeps; ++index) {
-        const auto moved_horizontal =
-            move_axis(
-                player,
-                horizontal_step,
-                true,
-                collision_lookup,
-                actor_bodies,
-                body,
-                result.contacted_actor);
+        const auto walls = collect_adjacent_walls(player, collision_lookup);
+        const auto adjusted_angle = tile_edge_adjust(requested_angle, walls);
+        const auto applied_angle = adjusted_angle.value_or(requested_angle);
+        const auto filtered_walls = adjusted_angle.has_value()
+            ? std::uint8_t{0}
+            : static_cast<std::uint8_t>(
+                  walls & bits_to_check[applied_angle]);
+        const auto radians =
+            static_cast<double>(applied_angle) *
+            full_turn_radians / 32.0;
+        const auto raw_horizontal = std::sin(radians);
+        const auto raw_vertical = -std::cos(radians);
+        const auto horizontal_step =
+            (std::abs(raw_horizontal) < 1.0e-12
+                 ? 0.0
+                 : raw_horizontal) *
+            distance / substeps;
+        const auto vertical_step =
+            (std::abs(raw_vertical) < 1.0e-12
+                 ? 0.0
+                 : raw_vertical) *
+            distance / substeps;
+        const auto vertical_blocked =
+            vertical_step != 0.0 && (filtered_walls & 0xf0) != 0;
+        const auto horizontal_blocked =
+            horizontal_step != 0.0 && (filtered_walls & 0x0f) != 0;
         const auto moved_vertical =
-            move_axis(
+            !vertical_blocked &&
+            move_actor_checked_axis(
                 player,
                 vertical_step,
                 false,
-                collision_lookup,
+                actor_bodies,
+                body,
+                result.contacted_actor);
+        const auto moved_horizontal =
+            !horizontal_blocked &&
+            move_actor_checked_axis(
+                player,
+                horizontal_step,
+                true,
                 actor_bodies,
                 body,
                 result.contacted_actor);
@@ -372,6 +499,8 @@ TraversalStep PlayerTraversal::step(
             result.moved || moved_horizontal || moved_vertical;
         result.blocked =
             result.blocked ||
+            adjusted_angle.has_value() ||
+            horizontal_blocked || vertical_blocked ||
             (horizontal_step != 0.0 && !moved_horizontal) ||
             (vertical_step != 0.0 && !moved_vertical);
     }
@@ -380,60 +509,19 @@ TraversalStep PlayerTraversal::step(
     return result;
 }
 
+std::uint8_t PlayerTraversal::adjacent_walls(
+    const PlayerState& player,
+    const CollisionLookup& collision_lookup) {
+    return collect_adjacent_walls(player, collision_lookup);
+}
+
 bool PlayerTraversal::can_occupy(
     const PlayerState& player,
     const CollisionLookup& collision_lookup,
     const std::span<const ActorCollisionBody> actor_bodies,
     const PlayerBody body) {
-    const std::array<CollisionSample, 8> samples{
-        CollisionSample{
-            player.room,
-            player.local_x - body.half_width + collision_epsilon,
-            player.local_y - body.half_height + collision_epsilon,
-        },
-        CollisionSample{
-            player.room,
-            player.local_x,
-            player.local_y - body.half_height + collision_epsilon,
-        },
-        CollisionSample{
-            player.room,
-            player.local_x + body.half_width - collision_epsilon,
-            player.local_y - body.half_height + collision_epsilon,
-        },
-        CollisionSample{
-            player.room,
-            player.local_x - body.half_width + collision_epsilon,
-            player.local_y,
-        },
-        CollisionSample{
-            player.room,
-            player.local_x + body.half_width - collision_epsilon,
-            player.local_y,
-        },
-        CollisionSample{
-            player.room,
-            player.local_x - body.half_width + collision_epsilon,
-            player.local_y + body.half_height - collision_epsilon,
-        },
-        CollisionSample{
-            player.room,
-            player.local_x,
-            player.local_y + body.half_height - collision_epsilon,
-        },
-        CollisionSample{
-            player.room,
-            player.local_x + body.half_width - collision_epsilon,
-            player.local_y + body.half_height - collision_epsilon,
-        },
-    };
     return
-        std::all_of(
-            samples.begin(),
-            samples.end(),
-            [&](const CollisionSample sample) {
-                return sample_is_clear(sample, collision_lookup);
-            }) &&
+        collect_adjacent_walls(player, collision_lookup) == 0 &&
         !overlaps_any_actor(player, actor_bodies, body);
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <span>
 
@@ -17,8 +18,8 @@ enum class PlayerFacing {
 };
 
 struct PlayerBody {
-    double half_width{4.0};
-    double half_height{3.0};
+    // Object-to-object collision is independent from Link's asymmetric
+    // terrain probes. Retail initializes both object radii to $06.
     double actor_collision_radius_x{6.0};
     double actor_collision_radius_y{6.0};
 };
@@ -54,8 +55,14 @@ public:
         double elapsed_seconds,
         const CollisionLookup& collision_lookup,
         std::span<const ActorCollisionBody> actor_bodies = {},
-        double speed_pixels_per_second = 64.0,
+        double speed_pixels_per_second = 60.0,
         PlayerBody body = {});
+
+    // Recreates calculateAdjacentWallsBitset: bits 7..0 correspond to the
+    // eight retail collision probes around Link in their original order.
+    [[nodiscard]] static std::uint8_t adjacent_walls(
+        const PlayerState& player,
+        const CollisionLookup& collision_lookup);
 
     [[nodiscard]] static bool can_occupy(
         const PlayerState& player,

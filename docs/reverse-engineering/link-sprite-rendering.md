@@ -4,7 +4,8 @@
 
 Link has two intentionally different sizes:
 
-- the current collision body is 8x6 world pixels;
+- terrain collision uses eight asymmetric probes spanning X offsets -5 through
+  +4 and Y offsets -3 through +7, while actor collision uses 6-by-6 radii;
 - the ordinary visual is a 16x16 composition made from two Game Boy 8x16
   hardware sprites.
 

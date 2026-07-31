@@ -32,19 +32,44 @@ The conversion and its inverse are tested independently.
 
 ## Collision body
 
-The current diagnostic body is an 8×6 pixel rectangle centered on the player.
-The shallower vertical footprint permits the original partially-solid door
-centering window. Eight perimeter samples are tested against
-`RoomCollisionMap`, using Link's original collision profile:
+Retail terrain collision is not a centered rectangle. The shared
+`calculateAdjacentWallsBitset` routine consumes a delta-encoded probe table;
+accumulating those deltas produces these eight offsets from Link's position:
+
+| Wall bit | Y | X | Side |
+| ---: | ---: | ---: | --- |
+| 7 | -3 | -3 | upper-left |
+| 6 | -3 | +2 | upper-right |
+| 5 | +7 | -3 | lower-left |
+| 4 | +7 | +2 | lower-right |
+| 3 | 0 | -5 | left-upper |
+| 2 | +5 | -5 | left-lower |
+| 1 | 0 | +4 | right-upper |
+| 0 | +5 | +4 | right-lower |
+
+This asymmetric footprint reaches farther below Link than above him. It is
+independent of the 6-by-6 object collision radii used when Link contacts an
+NPC or another actor. Every terrain probe is tested against
+`RoomCollisionMap`, using Link's ordinary collision profile:
 
 - ordinary four-quadrant collision masks block matching samples;
 - special bridge shapes use their original two-pixel stripe masks;
 - holes, water, and lava remain enterable because their fall/swim/damage
   reactions are separate gameplay behaviors.
 
-Movement is resolved independently on X and Y so the player slides along
-walls. Large elapsed movements are split into steps no larger than one pixel
-to prevent tunneling through narrow collision shapes.
+The resulting eight-bit wall mask is filtered through the retail
+`bitsToCheck` table for Link's 32-step movement angle. The original
+`tileEdgeAdjust` and `slideAngleTable` rules redirect movement when only one
+leading corner touches a tile, reproducing the characteristic edge slide.
+Blocked vertical and horizontal components are then applied independently.
+Large elapsed movements are split into steps no larger than one pixel to
+prevent tunneling, and ordinary `SPEED_100` traversal advances one cardinal
+pixel per 60 Hz logic tick.
+
+This slice implements ordinary grounded, hole-permitting Link collision.
+Raised-floor handling and the collision policy changes associated with jump,
+swim, fall, and hazard states remain explicit future gameplay states rather
+than presentation shortcuts.
 
 ## Seam crossing
 

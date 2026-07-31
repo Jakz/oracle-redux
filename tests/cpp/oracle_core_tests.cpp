@@ -2103,6 +2103,93 @@ void test_player_traversal() {
             player.local_x <= 154.0,
         "actor bodies block movement across a small-room seam");
 
+    RoomCollisionMap probe_map{
+        .id = WorldRoomId{.area = 4, .room = 0x5c},
+        .columns = 10,
+        .rows = 8,
+        .values = std::vector<std::uint8_t>(80, 0),
+    };
+    const auto probe_lookup =
+        [&](const WorldRoomId id) -> const RoomCollisionMap* {
+            return id == probe_map.id ? &probe_map : nullptr;
+        };
+
+    // Retail's lower probes are seven pixels below Link's position, not the
+    // three-pixel symmetric half-height used by the early diagnostic body.
+    probe_map.values[3 * 10 + 2] = 0x0f;
+    player = PlayerState{
+        .room = probe_map.id,
+        .local_x = 40.0,
+        .local_y = 40.0,
+    };
+    check(
+        PlayerTraversal::adjacent_walls(player, probe_lookup) == 0,
+        "retail lower probes leave the pixel before a wall clear");
+    check(
+        PlayerTraversal::can_occupy(player, probe_lookup),
+        "retail terrain footprint accepts the last clear lower position");
+    player.local_y = 41.0;
+    check(
+        PlayerTraversal::adjacent_walls(player, probe_lookup) == 0x30,
+        "retail lower probes occupy wall-mask bits five and four");
+    check(
+        !PlayerTraversal::can_occupy(player, probe_lookup),
+        "retail terrain footprint reaches seven pixels below Link");
+
+    // A single obstructed upper corner redirects cardinal movement sideways;
+    // this is the original tile-edge adjustment, not generic X/Y resolution.
+    probe_map.values.assign(80, 0);
+    probe_map.values[1 * 10 + 2] = 0x0f;
+    player = PlayerState{
+        .room = probe_map.id,
+        .local_x = 48.0,
+        .local_y = 34.0,
+    };
+    check(
+        PlayerTraversal::adjacent_walls(player, probe_lookup) == 0x80,
+        "upper-left terrain probe maps to adjacent-wall bit seven");
+    const auto edge_slide = PlayerTraversal::step(
+        player,
+        MovementInput{.vertical = -1.0},
+        1.0 / 60.0,
+        probe_lookup);
+    check(
+        edge_slide.moved && edge_slide.blocked,
+        "single-corner contact reports the retail edge slide");
+    check_close(
+        player.local_x,
+        49.0,
+        "upper-left contact redirects upward movement to the right");
+    check_close(
+        player.local_y,
+        34.0,
+        "tile-edge adjustment does not penetrate the upper wall");
+
+    player = PlayerState{
+        .room = probe_map.id,
+        .local_x = 40.0,
+        .local_y = 34.0,
+    };
+    check(
+        PlayerTraversal::adjacent_walls(player, probe_lookup) == 0xc0,
+        "both upper probes detect a centered wall");
+    const auto centered_wall = PlayerTraversal::step(
+        player,
+        MovementInput{.vertical = -1.0},
+        1.0 / 60.0,
+        probe_lookup);
+    check(
+        centered_wall.blocked && !centered_wall.moved,
+        "centered upper contact blocks instead of sliding");
+    check_close(
+        player.local_x,
+        40.0,
+        "centered wall contact preserves horizontal position");
+    check_close(
+        player.local_y,
+        34.0,
+        "centered wall contact preserves vertical position");
+
     const auto packed =
         PlayerTraversal::from_packed_room_position(
             WorldRoomId{.area = 2, .room = 0x9f},
