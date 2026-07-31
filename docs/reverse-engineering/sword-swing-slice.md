@@ -136,11 +136,11 @@ The native tests cover both exact US cartridges and assert that:
 - the four retail timing ranges select the expected parameters and poses;
 - the slot is released at the end marker;
 - a second press can allocate a new generation;
-- the shared arc damages each Octorok once and two swings defeat it.
+- the shared arc damages each Octorok once and the level-one sword's original
+  two-damage byte defeats a red Octorok in one swing.
 
 ## Next boundary
 
-Implement the enemy defeat aftermath: original hit feedback and knockback,
-death state timing, RNG-backed drop selection, and the bounded item-drop actor
-path. This should preserve deterministic records before another enemy family
-or secondary inventory item is added.
+The enemy defeat aftermath is implemented and documented in
+[`octorok-defeat-slice.md`](octorok-defeat-slice.md). The next combat boundary
+is a secondary item plus a persistent pickup or chest.

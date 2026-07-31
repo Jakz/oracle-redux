@@ -103,7 +103,7 @@ states `$08-$0b`, counters, cardinal subpixel speed, contact radius, damage,
 health, and deterministic replay. Enemy contact is explicitly separate from
 solid NPC collision. Semantic action B supplies the native parent/child sword
 allocation, retail attack timing, arc collision, and cartridge OAM
-two-strike defeat loop. See
+one-strike red-Octorok defeat path. See
 [`../reverse-engineering/octorok-combat-slice.md`](../reverse-engineering/octorok-combat-slice.md).
 
 ### Next implementation boundary
@@ -119,8 +119,14 @@ renders `spr_swords` through original item OAM, and holds Link in the attack
 animation. See
 [`../reverse-engineering/sword-swing-slice.md`](../reverse-engineering/sword-swing-slice.md).
 
-Next, add hit/death feedback and deterministic enemy drops before broadening
-to random-position records or another enemy family.
+The defeat checkpoint now applies the level-one sword's two damage units,
+palette-5 hit flash, 11-tick knockback, 20-tick enemy-destroyed part,
+Octorok's `$8e` probability/drop-set entry, bouncing heart/rupee parts, and
+collection. See
+[`../reverse-engineering/octorok-defeat-slice.md`](../reverse-engineering/octorok-defeat-slice.md).
+
+Next, add one secondary item and a persistent pickup or chest before
+broadening to random-position records or another enemy family.
 
 ## Following slices
 

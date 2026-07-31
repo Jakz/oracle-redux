@@ -104,13 +104,15 @@ Enemy contact and solid NPC bodies remain separate:
 - a bounded 60-tick player damage-invincibility window prevents repeated
   overlap damage;
 - `X` maps to semantic action B and starts the native 17-tick sword arc;
-- each swing can damage a given actor once; two one-damage swings release the
-  two-health Octorok slot.
+- each swing can damage a given actor once; the level-one sword's `$fe`
+  damage byte removes two health units and defeats a red Octorok in one hit.
 
 The sword now follows the original parent/child item slot, Link animation,
 arc-position, collision, graphics, and OAM path documented in
-[`sword-swing-slice.md`](sword-swing-slice.md). Knockback, enemy hit effects,
-drops, tile breaking, charging/spin states, and sound are not yet claimed.
+[`sword-swing-slice.md`](sword-swing-slice.md). Its knockback, enemy hit
+effect, and drop continuation is documented in
+[`octorok-defeat-slice.md`](octorok-defeat-slice.md). Tile breaking,
+charging/spin states, and sound are not yet claimed.
 
 ## Projectile part path
 
@@ -164,11 +166,11 @@ The headless dual-ROM tests assert:
   reverse-bounce states, and the 32-tick lifetime releases the slot;
 - projectile contact removes four health units and remains separate from
   solid NPC collision;
-- two separate sword presses produce hit then defeat;
+- one sword press applies two damage and enters the defeat aftermath;
 - identical seeds and tick sequences reproduce native runtime state;
 - both campaigns traverse the same shared behavior state.
 
-## Next boundary
+## Continued boundary
 
-Add original hit/death feedback and RNG-backed enemy drops now that the
-representative enemy, part, and sword item paths are connected.
+See [`octorok-defeat-slice.md`](octorok-defeat-slice.md) for the native
+knockback, death puff, RNG-backed drop, bounce, and collection path.

@@ -14,6 +14,8 @@ namespace oracle::gameplay {
 namespace {
 
 constexpr std::uint8_t octorok_enemy_id = 0x09;
+constexpr std::uint8_t item_drop_part_id = 0x01;
+constexpr std::uint8_t enemy_destroyed_part_id = 0x02;
 constexpr std::uint8_t octorok_projectile_part_id = 0x18;
 constexpr std::array<std::uint8_t, 8> counter_values{
     30, 45, 60, 75, 45, 60, 75, 90,
@@ -25,11 +27,28 @@ constexpr std::array<std::uint8_t, 5> decision_masks{
     0x07, 0x07, 0x03, 0x03, 0x01,
 };
 constexpr std::uint8_t player_damage_invincibility_ticks = 60;
+constexpr std::uint8_t sword_damage = 2;
+constexpr std::uint8_t sword_hit_invincibility_ticks = 0x15;
+constexpr std::uint8_t sword_knockback_ticks = 0x0b;
+constexpr std::int32_t sword_knockback_speed_subpixels = 0x200;
 constexpr std::int32_t projectile_speed_subpixels = 0x200;
 constexpr std::int32_t projectile_bounce_speed_subpixels = 0x40;
 constexpr std::int32_t projectile_bounce_velocity_subpixels = 0xe0;
 constexpr std::int32_t projectile_gravity_subpixels = 0x0e;
 constexpr std::uint8_t projectile_bounce_ticks = 0x20;
+constexpr std::uint8_t enemy_destroyed_ticks = 20;
+constexpr std::int32_t item_drop_initial_velocity_subpixels = 0x160;
+constexpr std::int32_t item_drop_gravity_subpixels = 0x20;
+constexpr std::uint16_t item_drop_lifetime_ticks = 480;
+constexpr std::array<std::uint8_t, 8> octorok_drop_probability{
+    0x49, 0x50, 0x49, 0x24, 0x88, 0x99, 0xb2, 0xd2,
+};
+constexpr std::array<std::uint8_t, 32> octorok_drop_set{
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02,
+    0x01, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02,
+    0x02, 0x02, 0x02, 0x02, 0x03, 0x03, 0x03, 0x03,
+};
 
 enum class ProjectileTerrainResult {
     clear,
@@ -261,6 +280,29 @@ void apply_contact_damage(
     combat.invincibility_ticks = player_damage_invincibility_ticks;
 }
 
+std::uint8_t enemy_destroyed_oam_index(
+    const std::uint8_t tick) noexcept {
+    if (tick < 2) {
+        return 0;
+    }
+    if (tick < 4) {
+        return 1;
+    }
+    if (tick < 6) {
+        return 0;
+    }
+    if (tick < 10) {
+        return 2;
+    }
+    if (tick < 14) {
+        return 3;
+    }
+    if (tick < 18) {
+        return 4;
+    }
+    return 5;
+}
+
 }  // namespace
 
 OctorokScenarioDefinition octorok_scenario(
@@ -289,8 +331,10 @@ OctorokRuntime::OctorokRuntime(
 void OctorokRuntime::reset(const std::uint16_t rng_seed) noexcept {
     actor_runtime_ = {};
     projectile_runtime_ = {};
+    aftermath_runtime_ = {};
     rng_low_ = static_cast<std::uint8_t>(rng_seed & 0xff);
     rng_high_ = static_cast<std::uint8_t>(rng_seed >> 8u);
+    frame_counter_ = 0;
 }
 
 void OctorokRuntime::initialize_projectile(
@@ -473,6 +517,174 @@ void OctorokRuntime::update_projectiles(
     }
 }
 
+bool OctorokRuntime::spawn_death_puff(
+    const core::ActorSlotState& source,
+    core::ActorSlotDomain& actors) {
+    const auto handle = actors.allocate_dynamic(
+        core::ActorCategory::part,
+        core::ActorIdentity{
+            .id = enemy_destroyed_part_id,
+            .subid = source.identity.id,
+        },
+        source.room,
+        source.local_x,
+        source.local_y,
+        true,
+        false,
+        source.source_record_index);
+    if (!handle.has_value()) {
+        return false;
+    }
+    auto& runtime = aftermath_runtime_[handle->slot];
+    runtime = AftermathRuntime{};
+    runtime.generation = handle->generation;
+    runtime.phase = AftermathPhase::enemy_destroyed;
+    runtime.initialized = true;
+    return true;
+}
+
+std::optional<std::uint8_t>
+OctorokRuntime::decide_octorok_drop() noexcept {
+    const auto probability_index =
+        static_cast<std::uint8_t>(next_random().value & 0x3f);
+    const auto probability_byte =
+        octorok_drop_probability[probability_index >> 3u];
+    const auto probability_bit = static_cast<std::uint8_t>(
+        1u << (probability_index & 0x07));
+    if ((probability_byte & probability_bit) == 0) {
+        return std::nullopt;
+    }
+    return octorok_drop_set[next_random().value & 0x1f];
+}
+
+void OctorokRuntime::update_aftermath(
+    const PlayerState& player,
+    PlayerCombatState& combat,
+    core::ActorSlotDomain& actors,
+    OctorokStepReport& report) {
+    const auto part_slots = actors.slots(core::ActorCategory::part);
+    for (std::size_t slot = 0; slot < part_slots.size(); ++slot) {
+        const auto& immutable_actor = part_slots[slot];
+        if (
+            !immutable_actor.active ||
+            (
+                immutable_actor.identity.id != enemy_destroyed_part_id &&
+                immutable_actor.identity.id != item_drop_part_id)) {
+            continue;
+        }
+        const core::ActorSlotHandle handle{
+            core::ActorCategory::part,
+            static_cast<std::uint8_t>(slot),
+            immutable_actor.generation,
+        };
+        auto* actor = actors.get(handle);
+        if (actor == nullptr) {
+            continue;
+        }
+        auto& runtime = aftermath_runtime_[slot];
+        if (
+            !runtime.initialized ||
+            runtime.generation != actor->generation) {
+            runtime = AftermathRuntime{};
+            runtime.generation = actor->generation;
+            runtime.initialized = true;
+            runtime.phase =
+                actor->identity.id == enemy_destroyed_part_id
+                ? AftermathPhase::enemy_destroyed
+                : AftermathPhase::item_drop_bouncing;
+            if (runtime.phase == AftermathPhase::item_drop_bouncing) {
+                runtime.vertical_velocity_subpixels =
+                    item_drop_initial_velocity_subpixels;
+            }
+        }
+
+        if (runtime.phase == AftermathPhase::enemy_destroyed) {
+            ++runtime.animation_tick;
+            if (runtime.animation_tick < enemy_destroyed_ticks) {
+                continue;
+            }
+            const auto drop = decide_octorok_drop();
+            if (!drop.has_value()) {
+                (void)actors.release(handle);
+                continue;
+            }
+            actor->identity = core::ActorIdentity{
+                .id = item_drop_part_id,
+                .subid = *drop,
+            };
+            const auto definition =
+                part_definitions_.decode(item_drop_part_id);
+            actor->collision_radius_y =
+                definition.collision_radius_y;
+            actor->collision_radius_x =
+                definition.collision_radius_x;
+            actor->contact_damage = 0;
+            actor->blocks_player = false;
+            runtime.phase = AftermathPhase::item_drop_bouncing;
+            runtime.counter = 0;
+            runtime.animation_tick = 0;
+            runtime.elevation_subpixels = 0;
+            runtime.vertical_velocity_subpixels =
+                item_drop_initial_velocity_subpixels;
+            ++report.item_drops_spawned;
+            continue;
+        }
+
+        if (runtime.phase == AftermathPhase::item_drop_bouncing) {
+            runtime.elevation_subpixels +=
+                runtime.vertical_velocity_subpixels;
+            runtime.vertical_velocity_subpixels -=
+                item_drop_gravity_subpixels;
+            if (
+                runtime.elevation_subpixels <= 0 &&
+                runtime.vertical_velocity_subpixels < 0) {
+                runtime.elevation_subpixels = 0;
+                const auto rebound =
+                    -runtime.vertical_velocity_subpixels / 2;
+                if (rebound < 0x80) {
+                    runtime.vertical_velocity_subpixels = 0;
+                    runtime.phase = AftermathPhase::item_drop_waiting;
+                    runtime.counter = item_drop_lifetime_ticks;
+                } else {
+                    runtime.vertical_velocity_subpixels = rebound;
+                }
+            }
+            continue;
+        }
+
+        if (overlaps_player(*actor, player)) {
+            switch (actor->identity.subid) {
+            case 0x01:
+                combat.health = static_cast<std::uint8_t>(
+                    std::min(
+                        static_cast<unsigned int>(combat.maximum_health),
+                        static_cast<unsigned int>(combat.health) + 4u));
+                break;
+            case 0x02:
+                combat.rupees = static_cast<std::uint16_t>(
+                    std::min(999u, combat.rupees + 1u));
+                break;
+            case 0x03:
+                combat.rupees = static_cast<std::uint16_t>(
+                    std::min(999u, combat.rupees + 5u));
+                break;
+            default:
+                break;
+            }
+            (void)actors.release(handle);
+            ++report.item_drops_collected;
+            continue;
+        }
+        if (runtime.counter != 0) {
+            --runtime.counter;
+        }
+        if (runtime.counter == 0) {
+            (void)actors.release(handle);
+            ++report.item_drops_expired;
+        }
+    }
+}
+
 OctorokRuntime::RandomStep OctorokRuntime::next_random() noexcept {
     // Exact getRandomNumber_noPreserveVars transition:
     // HL=(hRng2:hRng1)*3, hRng2=H, hRng1=H+old hRng1.
@@ -598,6 +810,46 @@ bool OctorokRuntime::move_actor(
     return true;
 }
 
+bool OctorokRuntime::move_knockback(
+    core::ActorSlotState& actor,
+    ActorRuntime& runtime,
+    const EnemyCollisionLookup& collision_lookup) {
+    const auto [velocity_x, velocity_y] =
+        cardinal_velocity(
+            runtime.knockback_angle,
+            sword_knockback_speed_subpixels);
+    auto candidate_subpixel_x =
+        static_cast<std::int32_t>(runtime.subpixel_x);
+    auto candidate_subpixel_y =
+        static_cast<std::int32_t>(runtime.subpixel_y);
+    const auto [delta_x, delta_y] =
+        apply_subpixel_velocity(
+            candidate_subpixel_x,
+            candidate_subpixel_y,
+            velocity_x,
+            velocity_y);
+    const auto candidate_x = static_cast<std::int16_t>(
+        actor.local_x + delta_x);
+    const auto candidate_y = static_cast<std::int16_t>(
+        actor.local_y + delta_y);
+    if (!enemy_position_is_clear(
+            actor,
+            candidate_x,
+            candidate_y,
+            collision_lookup)) {
+        runtime.subpixel_x = 0;
+        runtime.subpixel_y = 0;
+        return false;
+    }
+    runtime.subpixel_x =
+        static_cast<std::int16_t>(candidate_subpixel_x);
+    runtime.subpixel_y =
+        static_cast<std::int16_t>(candidate_subpixel_y);
+    actor.local_x = candidate_x;
+    actor.local_y = candidate_y;
+    return true;
+}
+
 std::uint8_t OctorokRuntime::cardinal_angle_to_player(
     const core::ActorSlotState& actor,
     const PlayerState& player) const noexcept {
@@ -634,6 +886,11 @@ OctorokStepReport OctorokRuntime::update(
         actors,
         collision_lookup,
         report);
+    update_aftermath(
+        player,
+        combat,
+        actors,
+        report);
     if (sword_step.started) {
         report.sword_started = true;
         for (auto& runtime : actor_runtime_) {
@@ -664,6 +921,23 @@ OctorokStepReport OctorokRuntime::update(
             !runtime.initialized ||
             runtime.generation != actor->generation) {
             initialize_actor(slot, *actor);
+        }
+        if (runtime.knockback_counter != 0) {
+            --runtime.knockback_counter;
+            if (!move_knockback(
+                    *actor,
+                    runtime,
+                    collision_lookup)) {
+                runtime.knockback_counter = 0;
+            }
+            continue;
+        }
+        if (actor->health == 0) {
+            if (spawn_death_puff(*actor, actors)) {
+                ++report.death_puffs_spawned;
+            }
+            (void)actors.release(handle);
+            continue;
         }
 
         switch (runtime.phase) {
@@ -758,13 +1032,20 @@ OctorokStepReport OctorokRuntime::update(
                 continue;
             }
             runtime.hit_this_swing = true;
-            runtime.hit_invincibility = 12;
+            runtime.hit_invincibility =
+                sword_hit_invincibility_ticks;
+            runtime.knockback_counter = sword_knockback_ticks;
+            runtime.knockback_angle = static_cast<std::uint8_t>(
+                cardinal_angle_to_player(*actor, player) ^ 0x10);
+            runtime.subpixel_x = 0;
+            runtime.subpixel_y = 0;
             ++report.enemies_hit;
-            if (actor->health > 0) {
-                --actor->health;
-            }
+            actor->health =
+                actor->health <= sword_damage
+                ? 0
+                : static_cast<std::uint8_t>(
+                    actor->health - sword_damage);
             if (actor->health == 0) {
-                (void)actors.release(handle);
                 ++report.enemies_defeated;
             }
         }
@@ -776,6 +1057,7 @@ OctorokStepReport OctorokRuntime::update(
             if (
                 !actor.active ||
                 actor.identity.id != octorok_enemy_id ||
+                actor.health == 0 ||
                 !overlaps_player(actor, player)) {
                 continue;
             }
@@ -784,6 +1066,7 @@ OctorokStepReport OctorokRuntime::update(
             break;
         }
     }
+    ++frame_counter_;
     return report;
 }
 
@@ -813,6 +1096,53 @@ double OctorokRuntime::projectile_elevation(
         static_cast<double>(
             projectile_runtime_[actor.slot].elevation_subpixels) /
         256.0;
+}
+
+std::optional<OctorokAftermathVisual>
+OctorokRuntime::aftermath_visual(
+    const core::ActorSlotHandle actor) const noexcept {
+    if (
+        actor.category != core::ActorCategory::part ||
+        actor.slot >= aftermath_runtime_.size()) {
+        return std::nullopt;
+    }
+    const auto& runtime = aftermath_runtime_[actor.slot];
+    if (
+        !runtime.initialized ||
+        runtime.generation != actor.generation) {
+        return std::nullopt;
+    }
+    if (runtime.phase == AftermathPhase::enemy_destroyed) {
+        return OctorokAftermathVisual{
+            .kind = OctorokAftermathKind::enemy_destroyed,
+            .oam_index =
+                enemy_destroyed_oam_index(runtime.animation_tick),
+        };
+    }
+    return OctorokAftermathVisual{
+        .kind = OctorokAftermathKind::item_drop,
+        .elevation =
+            static_cast<double>(runtime.elevation_subpixels) / 256.0,
+        .visible =
+            runtime.phase == AftermathPhase::item_drop_bouncing ||
+            runtime.counter >= 120 ||
+            ((frame_counter_ ^ actor.slot) & 1u) == 0,
+    };
+}
+
+bool OctorokRuntime::hit_flash(
+    const core::ActorSlotHandle actor) const noexcept {
+    if (
+        actor.category != core::ActorCategory::enemy ||
+        actor.slot >= actor_runtime_.size()) {
+        return false;
+    }
+    const auto& runtime = actor_runtime_[actor.slot];
+    return
+        runtime.initialized &&
+        runtime.generation == actor.generation &&
+        runtime.hit_invincibility != 0 &&
+        (frame_counter_ & 0x04) == 0;
 }
 
 std::optional<std::uint8_t> OctorokRuntime::animation_index(
@@ -856,14 +1186,23 @@ std::uint64_t OctorokRuntime::deterministic_state() const noexcept {
     };
     append(rng_low_);
     append(rng_high_);
+    append(frame_counter_);
     for (const auto& runtime : actor_runtime_) {
         append(runtime.generation);
         append(static_cast<std::uint8_t>(runtime.phase));
         append(runtime.counter);
         append(runtime.walk_counter);
         append(runtime.angle);
+        append(runtime.hit_invincibility);
+        append(runtime.knockback_counter);
+        append(runtime.knockback_angle);
+        append(
+            static_cast<std::uint16_t>(runtime.subpixel_x));
+        append(
+            static_cast<std::uint16_t>(runtime.subpixel_y));
         append(runtime.animation_tick);
         append(runtime.initialized);
+        append(runtime.hit_this_swing);
     }
     for (const auto& runtime : projectile_runtime_) {
         append(runtime.generation);
@@ -873,6 +1212,19 @@ std::uint64_t OctorokRuntime::deterministic_state() const noexcept {
         append(static_cast<std::uint32_t>(runtime.speed_subpixels));
         append(static_cast<std::uint32_t>(runtime.subpixel_x));
         append(static_cast<std::uint32_t>(runtime.subpixel_y));
+        append(
+            static_cast<std::uint32_t>(
+                runtime.elevation_subpixels));
+        append(
+            static_cast<std::uint32_t>(
+                runtime.vertical_velocity_subpixels));
+        append(runtime.initialized);
+    }
+    for (const auto& runtime : aftermath_runtime_) {
+        append(runtime.generation);
+        append(static_cast<std::uint8_t>(runtime.phase));
+        append(runtime.counter);
+        append(runtime.animation_tick);
         append(
             static_cast<std::uint32_t>(
                 runtime.elevation_subpixels));

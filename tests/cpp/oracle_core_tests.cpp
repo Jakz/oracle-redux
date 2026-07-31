@@ -723,6 +723,37 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
                 return pixel.alpha != 0;
             }),
         "Octorok projectile frame contains decoded ROM pixels");
+    const PartSpriteDecoder part_sprites{rom};
+    for (std::uint8_t oam = 0; oam < 6; ++oam) {
+        const auto frame =
+            part_sprites.decode_enemy_destroyed(oam);
+        check(
+            frame.part_id == 0x02 &&
+                frame.original_oam_index == oam &&
+                !frame.pixels.empty() &&
+                std::any_of(
+                    frame.pixels.begin(),
+                    frame.pixels.end(),
+                    [](const oracle::content::RgbaPixel pixel) {
+                        return pixel.alpha != 0;
+                    }),
+            "enemy-destroyed animation decodes original part pixels");
+    }
+    for (
+        const std::uint8_t drop :
+        std::array<std::uint8_t, 3>{0x01, 0x02, 0x03}) {
+        const auto frame = part_sprites.decode_item_drop(drop);
+        check(
+            frame.part_id == 0x01 &&
+                !frame.pixels.empty() &&
+                std::any_of(
+                    frame.pixels.begin(),
+                    frame.pixels.end(),
+                    [](const oracle::content::RgbaPixel pixel) {
+                        return pixel.alpha != 0;
+                    }),
+            "Octorok drop-set item decodes original part pixels");
+    }
 
     const auto scenario =
         oracle::gameplay::octorok_scenario(campaign);
@@ -943,51 +974,170 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
     check(
         first_strike.sword_started &&
             first_strike.enemies_hit == 1 &&
-            first_strike.enemies_defeated == 0 &&
+            first_strike.enemies_defeated == 1 &&
             active_octorok != nullptr &&
-            active_octorok->health == 1,
-        "first semantic sword strike removes one Octorok health unit");
-    for (int tick = 0; tick < 13; ++tick) {
-        const auto sword_step = sword_runtime.update(
-            {},
-            player,
-            actors);
+            active_octorok->health == 0,
+        "level-one sword applies retail damage two and defeats red Octorok");
+    const auto defeated_slot = std::find_if(
+        actors.slots(ActorCategory::enemy).begin(),
+        actors.slots(ActorCategory::enemy).end(),
+        [](const oracle::core::ActorSlotState& actor) {
+            return actor.active && actor.identity.id == 0x09;
+        });
+    const auto defeated_handle = oracle::core::ActorSlotHandle{
+        ActorCategory::enemy,
+        static_cast<std::uint8_t>(
+            std::distance(
+                actors.slots(ActorCategory::enemy).begin(),
+                defeated_slot)),
+        defeated_slot->generation,
+    };
+    check(
+        runtime.hit_flash(defeated_handle),
+        "sword hit exposes the retail invincibility palette flash");
+    const auto struck_x = active_octorok->local_x;
+    for (int tick = 0; tick < 11; ++tick) {
         (void)runtime.update(
             player,
             combat,
             actors,
-            collision_lookup,
-            sword_step);
-    }
-    for (int tick = 0; tick < 4; ++tick) {
-        const auto sword_step = sword_runtime.update({}, player, actors);
-        (void)runtime.update(
-            player,
-            combat,
-            actors,
-            collision_lookup,
-            sword_step);
+            collision_lookup);
     }
     active_octorok = locate_octorok();
-    if (active_octorok != nullptr) {
-        player.local_x = active_octorok->local_x - 16.0;
-        player.local_y = active_octorok->local_y + 2.0;
-    }
-    const auto second_sword = sword_runtime.update(
-        pressed_frame(InputAction::b),
-        player,
-        actors);
-    const auto second_strike = runtime.update(
+    check(
+        active_octorok != nullptr &&
+            active_octorok->local_x > struck_x,
+        "fatal sword hit preserves eleven ticks of knockback");
+    const auto death_start = runtime.update(
         player,
         combat,
         actors,
-        collision_lookup,
-        second_sword);
+        collision_lookup);
     check(
-        second_strike.enemies_hit == 1 &&
-            second_strike.enemies_defeated == 1 &&
+        death_start.death_puffs_spawned == 1 &&
             locate_octorok() == nullptr,
-        "second semantic sword strike releases the defeated enemy slot");
+        "post-knockback enemy becomes PART_ENEMY_DESTROYED");
+    const auto find_part = [&](const std::uint8_t id)
+        -> std::optional<oracle::core::ActorSlotHandle> {
+        const auto slots = actors.slots(ActorCategory::part);
+        for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+            if (slots[slot].active && slots[slot].identity.id == id) {
+                return oracle::core::ActorSlotHandle{
+                    ActorCategory::part,
+                    static_cast<std::uint8_t>(slot),
+                    slots[slot].generation,
+                };
+            }
+        }
+        return std::nullopt;
+    };
+    const auto death_part = find_part(0x02);
+    check(
+        death_part.has_value() &&
+            runtime.aftermath_visual(*death_part).has_value() &&
+            runtime.aftermath_visual(*death_part)->oam_index == 0,
+        "death puff begins on original OAM frame zero");
+    for (int tick = 0; tick < 19; ++tick) {
+        (void)runtime.update(
+            player,
+            combat,
+            actors,
+            collision_lookup);
+    }
+    check(
+        death_part.has_value() &&
+            runtime.aftermath_visual(*death_part).has_value() &&
+            runtime.aftermath_visual(*death_part)->oam_index == 5,
+        "twenty-tick death puff reaches original final OAM frame");
+    (void)runtime.update(
+        player,
+        combat,
+        actors,
+        collision_lookup);
+    check(
+        !find_part(0x02).has_value() &&
+            !find_part(0x01).has_value(),
+        "seed 5a17 follows Octorok probability table to no drop");
+
+    ActorSlotDomain drop_actors;
+    (void)RoomActorLoader::load(catalog, drop_actors);
+    const auto drop_enemy = std::find_if(
+        drop_actors.slots(ActorCategory::enemy).begin(),
+        drop_actors.slots(ActorCategory::enemy).end(),
+        [](const oracle::core::ActorSlotState& actor) {
+            return actor.active && actor.identity.id == 0x09;
+        });
+    auto drop_player = PlayerState{
+        .room = scenario.room,
+        .local_x = drop_enemy->local_x - 16.0,
+        .local_y = drop_enemy->local_y + 2.0,
+        .facing = PlayerFacing::north,
+    };
+    OctorokRuntime drop_runtime{rom, 0x0003};
+    PlayerCombatState drop_combat{.health = 5};
+    oracle::gameplay::SwordRuntime drop_sword_runtime;
+    const auto drop_sword = drop_sword_runtime.update(
+        pressed_frame(InputAction::b),
+        drop_player,
+        drop_actors);
+    (void)drop_runtime.update(
+        drop_player,
+        drop_combat,
+        drop_actors,
+        collision_lookup,
+        drop_sword);
+    for (int tick = 0; tick < 32; ++tick) {
+        (void)drop_runtime.update(
+            drop_player,
+            drop_combat,
+            drop_actors,
+            collision_lookup);
+    }
+    const auto item_drop = [&]()
+        -> std::optional<oracle::core::ActorSlotHandle> {
+        const auto slots = drop_actors.slots(ActorCategory::part);
+        for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+            if (
+                slots[slot].active &&
+                slots[slot].identity.id == 0x01) {
+                return oracle::core::ActorSlotHandle{
+                    ActorCategory::part,
+                    static_cast<std::uint8_t>(slot),
+                    slots[slot].generation,
+                };
+            }
+        }
+        return std::nullopt;
+    }();
+    check(
+        item_drop.has_value() &&
+            drop_actors.get(*item_drop)->identity.subid == 0x01 &&
+            drop_runtime.aftermath_visual(*item_drop).has_value(),
+        "seed 0003 selects a heart from Octorok drop set E");
+    if (item_drop.has_value()) {
+        for (int tick = 0; tick < 80; ++tick) {
+            (void)drop_runtime.update(
+                drop_player,
+                drop_combat,
+                drop_actors,
+                collision_lookup);
+        }
+        const auto* drop_actor = drop_actors.get(*item_drop);
+        if (drop_actor != nullptr) {
+            drop_player.local_x = drop_actor->local_x;
+            drop_player.local_y = drop_actor->local_y;
+        }
+        const auto collected = drop_runtime.update(
+            drop_player,
+            drop_combat,
+            drop_actors,
+            collision_lookup);
+        check(
+            collected.item_drops_collected == 1 &&
+                drop_combat.health == 9 &&
+                drop_actors.get(*item_drop) == nullptr,
+            "settled heart drop restores four health and releases its slot");
+    }
 
     ActorSlotDomain replay_actors;
     (void)RoomActorLoader::load(catalog, replay_actors);

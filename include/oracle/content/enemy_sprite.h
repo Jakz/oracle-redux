@@ -28,6 +28,10 @@ public:
     [[nodiscard]] EnemySpriteFrame decode_octorok(
         std::uint8_t animation_index,
         std::uint64_t animation_tick) const;
+    [[nodiscard]] EnemySpriteFrame decode_octorok_palette(
+        std::uint8_t animation_index,
+        std::uint64_t animation_tick,
+        std::uint8_t palette) const;
 
 private:
     const RomSource& rom_;

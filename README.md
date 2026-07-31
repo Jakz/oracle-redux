@@ -128,8 +128,9 @@ The scaffold currently contains:
   slide, and replayed interaction input;
 - a shared native Octorok combat path with cartridge-decoded enemy properties,
   compression mode, directional OAM, authentic sprite pixels, original RNG
-  and action counters, non-solid contact damage, damage invincibility, and a
-  deterministic two-hit defeat loop;
+  and action counters, non-solid contact damage, damage invincibility,
+  level-one sword damage, knockback, palette flashing, the original
+  enemy-destroyed puff, and deterministic heart/rupee drops;
 - a shared native sword path with reserved parent-item slot allocation,
   original Link attack timing and frames, byte-mapped collision arcs, and
   cartridge-decoded `spr_swords` item OAM;
@@ -189,9 +190,12 @@ build/oracle_room_slice path/to/oracle.gbc --octorok-scenario
 
 Octoroks now allocate their original `$18` projectile in the bounded part
 band. Its ROM graphics, wall impact, reverse bounce, expiry, and player damage
-are active. Use `X` for the native sword swing. The decoded enemy and
-projectile paths are documented in
+are active. Use `X` for the native sword swing. A defeated red Octorok follows
+the original knockback, death-puff, drop-probability, bounce, and collection
+path. The decoded enemy and projectile paths are documented in
 [`docs/reverse-engineering/octorok-combat-slice.md`](docs/reverse-engineering/octorok-combat-slice.md).
+The aftermath trace is in
+[`docs/reverse-engineering/octorok-defeat-slice.md`](docs/reverse-engineering/octorok-defeat-slice.md).
 The parent-item timing, arc, and OAM map is in
 [`docs/reverse-engineering/sword-swing-slice.md`](docs/reverse-engineering/sword-swing-slice.md).
 

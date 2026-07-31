@@ -625,6 +625,7 @@ void render_vasu_actors(
 void render_octorok_actors(
     SDL_Renderer* renderer,
     const std::array<SDL_Texture*, 8>& textures,
+    const std::array<SDL_Texture*, 8>& flash_textures,
     const std::array<oracle::content::EnemySpriteFrame, 8>& frames,
     const oracle::gameplay::OctorokRuntime& runtime,
     const oracle::core::ActorSlotDomain& actors,
@@ -674,7 +675,10 @@ void render_octorok_actors(
             static_cast<std::size_t>(
                 (runtime.animation_tick(handle) / 8) & 1u);
         const auto& frame = frames[frame_index];
-        auto* texture = textures[frame_index];
+        auto* texture =
+            runtime.hit_flash(handle)
+            ? flash_textures[frame_index]
+            : textures[frame_index];
 
         const auto screen_x = static_cast<float>(
             (world_x - camera.x) * camera.zoom +
@@ -695,6 +699,118 @@ void render_octorok_actors(
                 static_cast<float>(frame.origin_y * camera.zoom),
             static_cast<float>(frame.width * camera.zoom),
             static_cast<float>(frame.height * camera.zoom),
+        };
+        SDL_RenderTexture(renderer, texture, &source, &destination);
+    }
+}
+
+void render_octorok_aftermath(
+    SDL_Renderer* renderer,
+    const std::array<SDL_Texture*, 6>& death_textures,
+    const std::array<oracle::content::PartSpriteFrame, 6>& death_frames,
+    const std::array<SDL_Texture*, 4>& drop_textures,
+    const std::array<oracle::content::PartSpriteFrame, 4>& drop_frames,
+    const oracle::gameplay::OctorokRuntime& runtime,
+    const oracle::core::ActorSlotDomain& actors,
+    const std::vector<RoomPlacement>& rooms,
+    const oracle::gameplay::PlayerState& player,
+    const bool in_front_of_player,
+    const CameraState camera,
+    const int output_width,
+    const int output_height) {
+    const auto player_world_y =
+        oracle::gameplay::PlayerTraversal::world_y(player);
+    const auto part_slots =
+        actors.slots(oracle::core::ActorCategory::part);
+    for (std::size_t slot = 0; slot < part_slots.size(); ++slot) {
+        const auto& actor = part_slots[slot];
+        if (
+            !actor.active ||
+            !actor.positioned ||
+            (actor.identity.id != 0x01 && actor.identity.id != 0x02)) {
+            continue;
+        }
+        const oracle::core::ActorSlotHandle handle{
+            oracle::core::ActorCategory::part,
+            static_cast<std::uint8_t>(slot),
+            actor.generation,
+        };
+        const auto visual = runtime.aftermath_visual(handle);
+        if (!visual.has_value() || !visual->visible) {
+            continue;
+        }
+        const auto placement = std::find_if(
+            rooms.begin(),
+            rooms.end(),
+            [&](const RoomPlacement& candidate) {
+                return candidate.layout.id == actor.room;
+            });
+        if (placement == rooms.end()) {
+            continue;
+        }
+        const auto world_x = placement->world_x + actor.local_x;
+        const auto ground_y = placement->world_y + actor.local_y;
+        if ((ground_y > player_world_y) != in_front_of_player) {
+            continue;
+        }
+
+        const oracle::content::PartSpriteFrame* frame = nullptr;
+        SDL_Texture* texture = nullptr;
+        if (
+            visual->kind ==
+            oracle::gameplay::OctorokAftermathKind::enemy_destroyed) {
+            frame = &death_frames[visual->oam_index];
+            texture = death_textures[visual->oam_index];
+        } else {
+            const auto drop =
+                static_cast<std::size_t>(actor.identity.subid);
+            if (drop >= drop_frames.size()) {
+                continue;
+            }
+            frame = &drop_frames[drop];
+            texture = drop_textures[drop];
+        }
+        if (frame == nullptr || texture == nullptr) {
+            continue;
+        }
+
+        const auto screen_x = static_cast<float>(
+            (world_x - camera.x) * camera.zoom +
+            output_width * 0.5);
+        const auto screen_ground_y = static_cast<float>(
+            (ground_y - camera.y) * camera.zoom +
+            output_height * 0.5);
+        if (
+            visual->kind ==
+            oracle::gameplay::OctorokAftermathKind::item_drop) {
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer, 4, 10, 14, 105);
+            const SDL_FRect shadow{
+                screen_x - static_cast<float>(4.0 * camera.zoom),
+                screen_ground_y +
+                    static_cast<float>(8.0 * camera.zoom),
+                static_cast<float>(8.0 * camera.zoom),
+                std::max(
+                    1.0f,
+                    static_cast<float>(2.0 * camera.zoom)),
+            };
+            SDL_RenderFillRect(renderer, &shadow);
+        }
+        const SDL_FRect source{
+            0.0f,
+            0.0f,
+            static_cast<float>(frame->width),
+            static_cast<float>(frame->height),
+        };
+        const SDL_FRect destination{
+            screen_x +
+                static_cast<float>(frame->origin_x * camera.zoom),
+            screen_ground_y +
+                static_cast<float>(
+                    (frame->origin_y - visual->elevation) *
+                    camera.zoom),
+            static_cast<float>(frame->width * camera.zoom),
+            static_cast<float>(frame->height * camera.zoom),
         };
         SDL_RenderTexture(renderer, texture, &source, &destination);
     }
@@ -1792,6 +1908,104 @@ int run_window(
         SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
         SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
     }
+    std::array<SDL_Texture*, 8> octorok_flash_textures{};
+    for (
+        std::size_t index = 0;
+        index < octorok_flash_textures.size();
+        ++index) {
+        const auto direction =
+            static_cast<std::uint8_t>(index / 2);
+        const auto animation_tick =
+            static_cast<std::uint64_t>((index & 1u) * 8);
+        const auto frame =
+            enemy_sprite_decoder.decode_octorok_palette(
+                direction,
+                animation_tick,
+                5);
+        auto*& texture = octorok_flash_textures[index];
+        texture = SDL_CreateTexture(
+            renderer,
+            SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STATIC,
+            frame.width,
+            frame.height);
+        if (
+            texture == nullptr ||
+            !SDL_UpdateTexture(
+                texture,
+                nullptr,
+                frame.pixels.data(),
+                frame.width *
+                    static_cast<int>(
+                        sizeof(oracle::content::RgbaPixel)))) {
+            throw std::runtime_error{
+                std::string{"Octorok flash texture creation failed: "} +
+                SDL_GetError()};
+        }
+        SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    }
+    std::array<oracle::content::PartSpriteFrame, 6>
+        enemy_destroyed_frames;
+    std::array<SDL_Texture*, 6> enemy_destroyed_textures{};
+    for (
+        std::size_t index = 0;
+        index < enemy_destroyed_frames.size();
+        ++index) {
+        auto& frame = enemy_destroyed_frames[index];
+        frame = part_sprite_decoder.decode_enemy_destroyed(
+            static_cast<std::uint8_t>(index));
+        auto*& texture = enemy_destroyed_textures[index];
+        texture = SDL_CreateTexture(
+            renderer,
+            SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STATIC,
+            frame.width,
+            frame.height);
+        if (
+            texture == nullptr ||
+            !SDL_UpdateTexture(
+                texture,
+                nullptr,
+                frame.pixels.data(),
+                frame.width *
+                    static_cast<int>(
+                        sizeof(oracle::content::RgbaPixel)))) {
+            throw std::runtime_error{
+                std::string{"enemy death texture creation failed: "} +
+                SDL_GetError()};
+        }
+        SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    }
+    std::array<oracle::content::PartSpriteFrame, 4> item_drop_frames;
+    std::array<SDL_Texture*, 4> item_drop_textures{};
+    for (std::uint8_t subid = 1; subid <= 3; ++subid) {
+        auto& frame = item_drop_frames[subid];
+        frame = part_sprite_decoder.decode_item_drop(subid);
+        auto*& texture = item_drop_textures[subid];
+        texture = SDL_CreateTexture(
+            renderer,
+            SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STATIC,
+            frame.width,
+            frame.height);
+        if (
+            texture == nullptr ||
+            !SDL_UpdateTexture(
+                texture,
+                nullptr,
+                frame.pixels.data(),
+                frame.width *
+                    static_cast<int>(
+                        sizeof(oracle::content::RgbaPixel)))) {
+            throw std::runtime_error{
+                std::string{"item drop texture creation failed: "} +
+                SDL_GetError()};
+        }
+        SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    }
     SDL_Texture* projectile_texture = SDL_CreateTexture(
         renderer,
         SDL_PIXELFORMAT_RGBA32,
@@ -2509,6 +2723,7 @@ int run_window(
             render_octorok_actors(
                 renderer,
                 octorok_textures,
+                octorok_flash_textures,
                 octorok_frames,
                 octorok_runtime,
                 current_actors,
@@ -2522,6 +2737,20 @@ int run_window(
                 renderer,
                 projectile_texture,
                 octorok_projectile_frame,
+                octorok_runtime,
+                current_actors,
+                rooms,
+                current_player,
+                false,
+                render_camera,
+                output_width,
+                output_height);
+            render_octorok_aftermath(
+                renderer,
+                enemy_destroyed_textures,
+                enemy_destroyed_frames,
+                item_drop_textures,
+                item_drop_frames,
                 octorok_runtime,
                 current_actors,
                 rooms,
@@ -2606,6 +2835,7 @@ int run_window(
             render_octorok_actors(
                 renderer,
                 octorok_textures,
+                octorok_flash_textures,
                 octorok_frames,
                 octorok_runtime,
                 current_actors,
@@ -2619,6 +2849,20 @@ int run_window(
                 renderer,
                 projectile_texture,
                 octorok_projectile_frame,
+                octorok_runtime,
+                current_actors,
+                rooms,
+                current_player,
+                true,
+                render_camera,
+                output_width,
+                output_height);
+            render_octorok_aftermath(
+                renderer,
+                enemy_destroyed_textures,
+                enemy_destroyed_frames,
+                item_drop_textures,
+                item_drop_frames,
                 octorok_runtime,
                 current_actors,
                 rooms,
@@ -2671,6 +2915,9 @@ int run_window(
             << static_cast<unsigned int>(player_combat.health)
             << '/'
             << static_cast<unsigned int>(player_combat.maximum_health);
+        diagnostic_line
+            << " R "
+            << player_combat.rupees;
         if (
             last_combat_step.enemies_hit != 0 ||
             last_combat_step.enemies_defeated != 0 ||
@@ -2757,6 +3004,15 @@ int run_window(
         SDL_DestroyTexture(texture);
     }
     for (auto* texture : octorok_textures) {
+        SDL_DestroyTexture(texture);
+    }
+    for (auto* texture : octorok_flash_textures) {
+        SDL_DestroyTexture(texture);
+    }
+    for (auto* texture : enemy_destroyed_textures) {
+        SDL_DestroyTexture(texture);
+    }
+    for (auto* texture : item_drop_textures) {
         SDL_DestroyTexture(texture);
     }
     SDL_DestroyTexture(projectile_texture);

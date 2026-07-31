@@ -35,10 +35,23 @@ enum class OctorokProjectilePhase : std::uint8_t {
     bouncing = 0x03,
 };
 
+enum class OctorokAftermathKind : std::uint8_t {
+    enemy_destroyed,
+    item_drop,
+};
+
+struct OctorokAftermathVisual {
+    OctorokAftermathKind kind{};
+    std::uint8_t oam_index{};
+    double elevation{};
+    bool visible{true};
+};
+
 struct PlayerCombatState {
     std::uint8_t maximum_health{12};
     std::uint8_t health{12};
     std::uint8_t invincibility_ticks{};
+    std::uint16_t rupees{};
 };
 
 struct OctorokStepReport {
@@ -50,6 +63,10 @@ struct OctorokStepReport {
     std::uint8_t projectile_impacts{};
     std::uint8_t projectile_contacts{};
     std::uint8_t projectiles_expired{};
+    std::uint8_t death_puffs_spawned{};
+    std::uint8_t item_drops_spawned{};
+    std::uint8_t item_drops_collected{};
+    std::uint8_t item_drops_expired{};
     bool sword_started{};
 };
 
@@ -84,6 +101,10 @@ public:
     projectile_phase(core::ActorSlotHandle actor) const noexcept;
     [[nodiscard]] double projectile_elevation(
         core::ActorSlotHandle actor) const noexcept;
+    [[nodiscard]] std::optional<OctorokAftermathVisual>
+    aftermath_visual(core::ActorSlotHandle actor) const noexcept;
+    [[nodiscard]] bool hit_flash(
+        core::ActorSlotHandle actor) const noexcept;
     [[nodiscard]] std::uint64_t deterministic_state() const noexcept;
 
 private:
@@ -95,6 +116,8 @@ private:
         std::uint8_t decision_mask{};
         std::uint8_t angle{};
         std::uint8_t hit_invincibility{};
+        std::uint8_t knockback_counter{};
+        std::uint8_t knockback_angle{};
         std::int16_t subpixel_x{};
         std::int16_t subpixel_y{};
         std::uint64_t animation_tick{};
@@ -122,6 +145,22 @@ private:
         bool initialized{};
     };
 
+    enum class AftermathPhase : std::uint8_t {
+        enemy_destroyed,
+        item_drop_bouncing,
+        item_drop_waiting,
+    };
+
+    struct AftermathRuntime {
+        std::uint32_t generation{};
+        AftermathPhase phase{AftermathPhase::enemy_destroyed};
+        std::uint16_t counter{};
+        std::uint8_t animation_tick{};
+        std::int32_t elevation_subpixels{};
+        std::int32_t vertical_velocity_subpixels{};
+        bool initialized{};
+    };
+
     [[nodiscard]] RandomStep next_random() noexcept;
     void initialize_actor(
         std::size_t slot,
@@ -139,7 +178,21 @@ private:
         core::ActorSlotDomain& actors,
         const EnemyCollisionLookup& collision_lookup,
         OctorokStepReport& report);
+    void update_aftermath(
+        const PlayerState& player,
+        PlayerCombatState& combat,
+        core::ActorSlotDomain& actors,
+        OctorokStepReport& report);
+    [[nodiscard]] bool spawn_death_puff(
+        const core::ActorSlotState& source,
+        core::ActorSlotDomain& actors);
+    [[nodiscard]] std::optional<std::uint8_t>
+    decide_octorok_drop() noexcept;
     [[nodiscard]] bool move_actor(
+        core::ActorSlotState& actor,
+        ActorRuntime& runtime,
+        const EnemyCollisionLookup& collision_lookup);
+    [[nodiscard]] bool move_knockback(
         core::ActorSlotState& actor,
         ActorRuntime& runtime,
         const EnemyCollisionLookup& collision_lookup);
@@ -156,8 +209,13 @@ private:
         ProjectileRuntime,
         core::ActorSlotDomain::slots_per_category>
         projectile_runtime_{};
+    std::array<
+        AftermathRuntime,
+        core::ActorSlotDomain::slots_per_category>
+        aftermath_runtime_{};
     std::uint8_t rng_low_{};
     std::uint8_t rng_high_{};
+    std::uint64_t frame_counter_{};
 };
 
 }  // namespace oracle::gameplay

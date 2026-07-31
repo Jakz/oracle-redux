@@ -14,16 +14,31 @@ namespace oracle::content {
 namespace {
 
 constexpr std::uint8_t octorok_projectile_part_id = 0x18;
-constexpr std::size_t octorok_graphics_size = 0x200;
+constexpr std::uint8_t item_drop_part_id = 0x01;
+constexpr std::uint8_t enemy_destroyed_part_id = 0x02;
+constexpr std::size_t part_graphics_size = 0x200;
 constexpr std::size_t tile_bytes = 16;
 constexpr std::uint8_t common_gameplay_palette_header = 0x0f;
+constexpr std::array<std::uint8_t, 16> item_drop_tile_offsets{
+    0x00, 0x02, 0x04, 0x06,
+    0x10, 0x12, 0x14, 0x16,
+    0x18, 0x1a, 0x1c, 0x1e,
+    0x0c, 0x0c, 0x0c, 0x08,
+};
+constexpr std::array<std::uint8_t, 16> item_drop_palettes{
+    0x02, 0x05, 0x00, 0x05,
+    0x04, 0x02, 0x03, 0x01,
+    0x01, 0x00, 0x00, 0x00,
+    0x01, 0x02, 0x03, 0x04,
+};
 
 using SpritePalettes =
     std::array<std::array<RgbaPixel, 4>, 8>;
 
 struct CampaignOffsets {
     std::size_t object_gfx_header_table{};
-    std::size_t projectile_oam_pointers{};
+    std::size_t part_oam_table{};
+    std::uint8_t part_oam_table_bank{};
     std::size_t palette_header_table{};
     std::uint8_t palette_data_bank{};
     std::uint8_t oam_data_bank{};
@@ -40,7 +55,8 @@ CampaignOffsets offsets_for(const core::Campaign campaign) noexcept {
     if (campaign == core::Campaign::ages) {
         return CampaignOffsets{
             0xfda8a,
-            0x5bc52,
+            0x5b71e,
+            0x16,
             0x632c,
             0x17,
             0x14,
@@ -48,7 +64,8 @@ CampaignOffsets offsets_for(const core::Campaign campaign) noexcept {
     }
     return CampaignOffsets{
         0xfdafb,
-        0x577a7,
+        0x57237,
+        0x15,
         0x6290,
         0x16,
         0x13,
@@ -114,9 +131,16 @@ SpritePalettes load_sprite_palettes(
 std::vector<OamObject> load_oam(
     const RomSource& rom,
     const CampaignOffsets offsets,
+    const std::uint8_t part_id,
     const std::uint8_t oam_index) {
+    const auto pointer_table_address = rom.read_little_u16(
+        offsets.part_oam_table +
+        static_cast<std::size_t>(part_id) * 2);
+    const auto pointer_table = rom.banked_file_offset(
+        offsets.part_oam_table_bank,
+        pointer_table_address);
     const auto pointer = rom.read_little_u16(
-        offsets.projectile_oam_pointers +
+        pointer_table +
         static_cast<std::size_t>(oam_index) * 2);
     auto cursor =
         rom.banked_file_offset(offsets.oam_data_bank, pointer);
@@ -158,15 +182,63 @@ std::uint8_t tile_color_index(
 PartSpriteDecoder::PartSpriteDecoder(const RomSource& rom) : rom_{rom} {}
 
 PartSpriteFrame PartSpriteDecoder::decode_octorok_projectile() const {
-    constexpr std::uint8_t oam_index = 0;
-    const auto offsets = offsets_for(rom_.metadata().campaign);
     const auto definition =
         PartDefinitionDecoder{rom_}.decode(
             octorok_projectile_part_id);
-    const auto objects = load_oam(rom_, offsets, oam_index);
+    return decode(
+        octorok_projectile_part_id,
+        0,
+        0,
+        static_cast<std::uint8_t>(definition.oam_flags & 0x07));
+}
+
+PartSpriteFrame PartSpriteDecoder::decode_enemy_destroyed(
+    const std::uint8_t oam_index) const {
+    if (oam_index >= 6) {
+        throw std::invalid_argument{
+            "enemy-destroyed OAM index must be between 0 and 5"};
+    }
+    const auto definition =
+        PartDefinitionDecoder{rom_}.decode(enemy_destroyed_part_id);
+    return decode(
+        enemy_destroyed_part_id,
+        oam_index,
+        0,
+        static_cast<std::uint8_t>(definition.oam_flags & 0x07));
+}
+
+PartSpriteFrame PartSpriteDecoder::decode_item_drop(
+    const std::uint8_t subid) const {
+    if (subid >= item_drop_tile_offsets.size()) {
+        throw std::invalid_argument{
+            "item-drop subid must be between 0 and 15"};
+    }
+    const auto oam_index =
+        subid == 0x0f
+        ? static_cast<std::uint8_t>(2)
+        : (
+            subid == 0x01 || (subid >= 0x05 && subid <= 0x0b)
+            ? static_cast<std::uint8_t>(1)
+            : static_cast<std::uint8_t>(0));
+    return decode(
+        item_drop_part_id,
+        oam_index,
+        item_drop_tile_offsets[subid],
+        item_drop_palettes[subid]);
+}
+
+PartSpriteFrame PartSpriteDecoder::decode(
+    const std::uint8_t part_id,
+    const std::uint8_t oam_index,
+    const std::uint8_t tile_offset,
+    const std::uint8_t palette_index) const {
+    const auto offsets = offsets_for(rom_.metadata().campaign);
+    const auto definition =
+        PartDefinitionDecoder{rom_}.decode(part_id);
+    const auto objects =
+        load_oam(rom_, offsets, part_id, oam_index);
     if (objects.empty()) {
-        throw std::runtime_error{
-            "Octorok projectile frame has no OAM objects"};
+        throw std::runtime_error{"part frame has no OAM objects"};
     }
 
     auto minimum_x = std::numeric_limits<std::int32_t>::max();
@@ -198,14 +270,13 @@ PartSpriteFrame PartSpriteDecoder::decode_octorok_projectile() const {
         rom_.banked_file_offset(graphics_bank, graphics_pointer);
     const auto graphics = RoomPixelDecoder::decompress_graphics(
         rom_.bytes().subspan(graphics_offset),
-        octorok_graphics_size,
+        part_graphics_size,
         compression_mode);
     const auto palettes = load_sprite_palettes(rom_, offsets);
-    const auto palette =
-        static_cast<std::size_t>(definition.oam_flags & 0x07);
+    const auto palette = static_cast<std::size_t>(palette_index);
 
     PartSpriteFrame frame{
-        .part_id = octorok_projectile_part_id,
+        .part_id = part_id,
         .original_oam_index = oam_index,
         .origin_x = minimum_x,
         .origin_y = minimum_y,
@@ -225,7 +296,9 @@ PartSpriteFrame PartSpriteDecoder::decode_octorok_projectile() const {
                 flip_y ? 15 - destination_y : destination_y;
             const auto source_tile =
                 static_cast<std::size_t>(
-                    definition.tile_base + object.tile) +
+                    definition.tile_base +
+                    tile_offset +
+                    object.tile) +
                 source_y / 8;
             const auto tile_y = source_y & 7u;
             for (std::size_t destination_x = 0;

@@ -18,15 +18,26 @@ struct PartSpriteFrame {
     std::vector<RgbaPixel> pixels;
 };
 
-// Bounded cartridge decoder for PART_OCTOROK_PROJECTILE ($18). It resolves
-// campaign-relocated partData, object graphics, palette, and part OAM tables.
+// Bounded cartridge decoder for the part actors used by the current native
+// slices. It resolves campaign-relocated partData, object graphics, palette,
+// and part OAM tables.
 class PartSpriteDecoder {
 public:
     explicit PartSpriteDecoder(const RomSource& rom);
 
     [[nodiscard]] PartSpriteFrame decode_octorok_projectile() const;
+    [[nodiscard]] PartSpriteFrame decode_enemy_destroyed(
+        std::uint8_t oam_index) const;
+    [[nodiscard]] PartSpriteFrame decode_item_drop(
+        std::uint8_t subid) const;
 
 private:
+    [[nodiscard]] PartSpriteFrame decode(
+        std::uint8_t part_id,
+        std::uint8_t oam_index,
+        std::uint8_t tile_offset,
+        std::uint8_t palette) const;
+
     const RomSource& rom_;
 };
 

@@ -163,9 +163,25 @@ EnemySpriteDecoder::EnemySpriteDecoder(const RomSource& rom)
 EnemySpriteFrame EnemySpriteDecoder::decode_octorok(
     const std::uint8_t animation_index,
     const std::uint64_t animation_tick) const {
+    const auto definition =
+        EnemyDefinitionDecoder{rom_}.decode(octorok_enemy_id, 0);
+    return decode_octorok_palette(
+        animation_index,
+        animation_tick,
+        definition.palette);
+}
+
+EnemySpriteFrame EnemySpriteDecoder::decode_octorok_palette(
+    const std::uint8_t animation_index,
+    const std::uint64_t animation_tick,
+    const std::uint8_t palette_index) const {
     if (animation_index >= 4) {
         throw std::invalid_argument{
             "Octorok animation index must be between 0 and 3"};
+    }
+    if (palette_index >= 8) {
+        throw std::invalid_argument{
+            "Octorok palette index must be between 0 and 7"};
     }
     const auto offsets = offsets_for(rom_.metadata().campaign);
     const auto frame_in_animation =
@@ -266,7 +282,7 @@ EnemySpriteFrame EnemySpriteDecoder::decode_octorok(
                             frame_y * frame.width + frame_x)];
                 if (pixel.alpha == 0) {
                     pixel =
-                        palettes[definition.palette][color_index];
+                        palettes[palette_index][color_index];
                 }
             }
         }
