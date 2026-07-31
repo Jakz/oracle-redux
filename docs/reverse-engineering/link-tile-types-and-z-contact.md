@@ -44,8 +44,9 @@ collision. `RoomTileTypeDecoder::sample_link_feet` preserves that boundary.
 The SDL slice shows the decoded active type on its status line. When the
 Feather lands, the diagnostic line records the landing type. Ordinary holes
 now consume the typed contact through the state machine documented in
-`hole-fall-and-respawn.md`; swim, drown, lava, ice, and conveyor reactions
-remain separate policies.
+`hole-fall-and-respawn.md`. Top-down water, Flippers swimming, and drowning
+are documented in `water-swimming-and-drowning.md`; lava, ice, and conveyor
+reactions remain separate policies.
 
 ## Z-aware object contact
 

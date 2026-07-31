@@ -142,9 +142,11 @@ terrain at Link Y+5, reports Feather landing type, and applies retail's
 six-versus-seven-pixel Z gate to ordinary enemy/projectile contact. See
 [`../reverse-engineering/link-tile-types-and-z-contact.md`](../reverse-engineering/link-tile-types-and-z-contact.md).
 
-Next, consume that typed terrain boundary in the hole pull/fall/respawn and
-water/lava entry state machines. Keep swimming capability, damage, and respawn
-ownership outside presentation code.
+The typed terrain boundary now drives ordinary holes plus top-down water entry,
+Flippers swimming, drowning, damage, and local respawn. See
+[`../reverse-engineering/water-swimming-and-drowning.md`](../reverse-engineering/water-swimming-and-drowning.md).
+Next, map and implement lava entry, damage, and respawn without coupling the
+policy to presentation.
 
 ## Following slices
 

@@ -15,10 +15,19 @@ constexpr std::uint8_t fall_frame_2_ticks = 0x0a;
 constexpr std::uint8_t fall_frame_3_ticks = 0x0a;
 constexpr std::uint8_t fall_animation_ticks =
     fall_frame_1_ticks + fall_frame_2_ticks + fall_frame_3_ticks;
+constexpr std::uint8_t flippers_entry_ticks = 0x0a;
+constexpr std::uint8_t mermaid_suit_entry_ticks = 0x02;
+constexpr std::uint8_t drown_splash_ticks = 0x06;
+constexpr std::uint8_t drown_body_ticks = 0x10;
+constexpr std::uint8_t drown_animation_ticks =
+    drown_splash_ticks + drown_body_ticks;
 constexpr std::uint8_t hidden_ticks = 0x02;
 constexpr std::uint8_t recovery_ticks = 0x10;
-constexpr std::uint8_t hole_damage = 0x04;
-constexpr std::uint8_t hole_invincibility_ticks = 0x3c;
+constexpr std::uint8_t hazard_damage = 0x04;
+constexpr std::uint8_t respawn_invincibility_ticks = 0x3c;
+constexpr std::uint8_t water_entry_invincibility_ticks = 0x88;
+constexpr double normal_speed_pixels_per_second = 60.0;
+constexpr double flippers_speed_pixels_per_second = 30.0;
 constexpr double metatile_center = 8.0;
 
 bool same_contact(
@@ -28,6 +37,20 @@ bool same_contact(
         left.type == right.type &&
         left.column == right.column &&
         left.row == right.row;
+}
+
+bool is_water(const content::LinkTileType type) noexcept {
+    return type == content::LinkTileType::water ||
+        type == content::LinkTileType::seawater;
+}
+
+bool can_swim(
+    const content::LinkTileType type,
+    const PlayerWaterCapability capability) noexcept {
+    if (type == content::LinkTileType::seawater) {
+        return capability == PlayerWaterCapability::mermaid_suit;
+    }
+    return capability != PlayerWaterCapability::none;
 }
 
 bool centered(const double coordinate) noexcept {
@@ -57,7 +80,24 @@ std::uint8_t fall_frame(const std::uint8_t tick) noexcept {
     return 0x0a;
 }
 
+std::uint8_t swim_frame(const std::uint8_t tick) noexcept {
+    return static_cast<std::uint8_t>(0x0b + ((tick / 0x10u) & 1u));
+}
+
+std::uint8_t drown_frame(
+    const core::Campaign campaign,
+    const std::uint8_t tick) noexcept {
+    if (tick < drown_splash_ticks) {
+        return campaign == core::Campaign::ages ? 0xd4 : 0xc8;
+    }
+    return 0x0b;
+}
+
 }  // namespace
+
+PlayerHazardRuntime::PlayerHazardRuntime(
+    const core::Campaign campaign) noexcept
+    : campaign_{campaign} {}
 
 void PlayerHazardRuntime::reset(const PlayerState& respawn_point) noexcept {
     set_respawn_point(respawn_point);
@@ -66,6 +106,8 @@ void PlayerHazardRuntime::reset(const PlayerState& respawn_point) noexcept {
     standing_counter_ = 0;
     phase_counter_ = 0;
     fall_tick_ = 0;
+    swim_tick_ = 0;
+    drown_tick_ = 0;
     visible_ = true;
 }
 
@@ -78,20 +120,63 @@ void PlayerHazardRuntime::set_respawn_point(
     respawn_point_.object_contact_enabled = true;
 }
 
+void PlayerHazardRuntime::set_water_capability(
+    const PlayerWaterCapability capability) noexcept {
+    water_capability_ = capability;
+}
+
 PlayerHazardStepReport PlayerHazardRuntime::update(
     PlayerState& player,
     PlayerCombatState& combat,
     const std::optional<content::LinkTileContact> contact,
     const bool landed_this_tick) noexcept {
-    auto result = report();
+    auto events = report();
 
     switch (phase_) {
     case PlayerHazardPhase::normal:
     case PlayerHazardPhase::hole_pull: {
         if (
             player.in_air != 0 ||
-            !contact.has_value() ||
-            contact->type != content::LinkTileType::hole) {
+            !contact.has_value()) {
+            phase_ = PlayerHazardPhase::normal;
+            standing_counter_ = 0;
+            last_contact_ = contact;
+            player.object_contact_enabled = true;
+            return report();
+        }
+
+        if (is_water(contact->type)) {
+            const auto contact_changed =
+                !last_contact_.has_value() ||
+                !same_contact(*last_contact_, *contact);
+            standing_counter_ = contact_changed
+                ? 1
+                : standing_counter_ == 0xff
+                ? standing_counter_
+                : static_cast<std::uint8_t>(standing_counter_ + 1);
+            last_contact_ = contact;
+            swim_tick_ = 0;
+            events.entered_water = true;
+            if (can_swim(contact->type, water_capability_)) {
+                phase_ = PlayerHazardPhase::water_entry;
+                phase_counter_ =
+                    water_capability_ == PlayerWaterCapability::mermaid_suit
+                    ? mermaid_suit_entry_ticks
+                    : flippers_entry_ticks;
+                player.object_contact_enabled = true;
+                events.began_swimming = true;
+            } else {
+                phase_ = PlayerHazardPhase::drowning;
+                drown_tick_ = 0;
+                player.object_contact_enabled = false;
+                combat.invincibility_ticks =
+                    water_entry_invincibility_ticks;
+                events.began_drowning = true;
+            }
+            break;
+        }
+
+        if (contact->type != content::LinkTileType::hole) {
             phase_ = PlayerHazardPhase::normal;
             standing_counter_ = 0;
             last_contact_ = contact;
@@ -118,7 +203,7 @@ PlayerHazardStepReport PlayerHazardRuntime::update(
         }
         last_contact_ = contact;
         phase_ = PlayerHazardPhase::hole_pull;
-        result.entered_hole = !was_pulling;
+        events.entered_hole = !was_pulling;
 
         const auto target_x =
             static_cast<double>(contact->column *
@@ -147,7 +232,7 @@ PlayerHazardStepReport PlayerHazardRuntime::update(
             // linkState02 substate 0 centers and initializes the animation on
             // the following Link update.
             fall_tick_ = 0xff;
-            result.began_fall = true;
+            events.began_fall = true;
         }
         break;
     }
@@ -177,8 +262,57 @@ PlayerHazardStepReport PlayerHazardRuntime::update(
             phase_ = PlayerHazardPhase::hidden_respawn_delay;
             phase_counter_ = hidden_ticks;
             visible_ = false;
-            result.became_hidden = true;
-            result.respawned = true;
+            events.became_hidden = true;
+            events.respawned = true;
+        }
+        break;
+    case PlayerHazardPhase::water_entry:
+    case PlayerHazardPhase::swimming:
+        if (
+            !contact.has_value() ||
+            !is_water(contact->type)) {
+            phase_ = PlayerHazardPhase::normal;
+            standing_counter_ = 0;
+            last_contact_ = contact;
+            player.object_contact_enabled = true;
+            break;
+        }
+        last_contact_ = contact;
+        if (standing_counter_ != 0xff) {
+            ++standing_counter_;
+        }
+        if (!can_swim(contact->type, water_capability_)) {
+            phase_ = PlayerHazardPhase::drowning;
+            drown_tick_ = 0;
+            player.object_contact_enabled = false;
+            combat.invincibility_ticks = water_entry_invincibility_ticks;
+            events.began_drowning = true;
+            break;
+        }
+        player.object_contact_enabled = true;
+        ++swim_tick_;
+        if (phase_ == PlayerHazardPhase::water_entry) {
+            if (phase_counter_ != 0) {
+                --phase_counter_;
+            }
+            if (phase_counter_ == 0) {
+                phase_ = PlayerHazardPhase::swimming;
+            }
+        }
+        break;
+    case PlayerHazardPhase::drowning:
+        player.object_contact_enabled = false;
+        if (drown_tick_ < drown_animation_ticks) {
+            ++drown_tick_;
+        }
+        if (drown_tick_ >= drown_animation_ticks) {
+            player = respawn_point_;
+            player.object_contact_enabled = false;
+            phase_ = PlayerHazardPhase::hidden_respawn_delay;
+            phase_counter_ = hidden_ticks;
+            visible_ = false;
+            events.became_hidden = true;
+            events.respawned = true;
         }
         break;
     case PlayerHazardPhase::hidden_respawn_delay:
@@ -190,15 +324,15 @@ PlayerHazardStepReport PlayerHazardRuntime::update(
             player.z_subpixels = 0;
             player.speed_z_subpixels = 0;
             player.in_air = 0;
-            combat.health = combat.health <= hole_damage
+            combat.health = combat.health <= hazard_damage
                 ? 0
-                : static_cast<std::uint8_t>(combat.health - hole_damage);
-            combat.invincibility_ticks = hole_invincibility_ticks;
+                : static_cast<std::uint8_t>(combat.health - hazard_damage);
+            combat.invincibility_ticks = respawn_invincibility_ticks;
             phase_ = PlayerHazardPhase::recovery;
             phase_counter_ = recovery_ticks;
             visible_ = true;
-            result.damaged = true;
-            result.fatal_damage = combat.health == 0;
+            events.damaged = true;
+            events.fatal_damage = combat.health == 0;
         }
         break;
     case PlayerHazardPhase::recovery:
@@ -211,19 +345,22 @@ PlayerHazardStepReport PlayerHazardRuntime::update(
             standing_counter_ = 0;
             last_contact_.reset();
             player.object_contact_enabled = true;
-            result.recovered = true;
+            events.recovered = true;
         }
         break;
     }
 
     auto current = report();
-    current.entered_hole = result.entered_hole;
-    current.began_fall = result.began_fall;
-    current.became_hidden = result.became_hidden;
-    current.respawned = result.respawned;
-    current.damaged = result.damaged;
-    current.fatal_damage = result.fatal_damage;
-    current.recovered = result.recovered;
+    current.entered_hole = events.entered_hole;
+    current.began_fall = events.began_fall;
+    current.entered_water = events.entered_water;
+    current.began_swimming = events.began_swimming;
+    current.began_drowning = events.began_drowning;
+    current.became_hidden = events.became_hidden;
+    current.respawned = events.respawned;
+    current.damaged = events.damaged;
+    current.fatal_damage = events.fatal_damage;
+    current.recovered = events.recovered;
     return current;
 }
 
@@ -233,14 +370,45 @@ PlayerHazardPhase PlayerHazardRuntime::phase() const noexcept {
 
 bool PlayerHazardRuntime::captures_input() const noexcept {
     return phase_ == PlayerHazardPhase::hole_fall ||
+        phase_ == PlayerHazardPhase::drowning ||
         phase_ == PlayerHazardPhase::hidden_respawn_delay ||
         phase_ == PlayerHazardPhase::recovery ||
         (phase_ == PlayerHazardPhase::hole_pull &&
          standing_counter_ >= partial_control_ticks);
 }
 
+bool PlayerHazardRuntime::swimming() const noexcept {
+    return phase_ == PlayerHazardPhase::water_entry ||
+        phase_ == PlayerHazardPhase::swimming;
+}
+
 bool PlayerHazardRuntime::visible() const noexcept {
     return visible_;
+}
+
+MovementInput PlayerHazardRuntime::movement_input(
+    const MovementInput requested,
+    const PlayerFacing facing) const noexcept {
+    if (phase_ != PlayerHazardPhase::water_entry) {
+        return requested;
+    }
+    switch (facing) {
+    case PlayerFacing::north: return MovementInput{.vertical = -1.0};
+    case PlayerFacing::east: return MovementInput{.horizontal = 1.0};
+    case PlayerFacing::south: return MovementInput{.vertical = 1.0};
+    case PlayerFacing::west: return MovementInput{.horizontal = -1.0};
+    }
+    return {};
+}
+
+double PlayerHazardRuntime::movement_speed_pixels_per_second() const noexcept {
+    return swimming()
+        ? flippers_speed_pixels_per_second
+        : normal_speed_pixels_per_second;
+}
+
+PlayerWaterCapability PlayerHazardRuntime::water_capability() const noexcept {
+    return water_capability_;
 }
 
 std::uint64_t PlayerHazardRuntime::deterministic_state() const noexcept {
@@ -248,7 +416,11 @@ std::uint64_t PlayerHazardRuntime::deterministic_state() const noexcept {
         (static_cast<std::uint64_t>(standing_counter_) << 8u) |
         (static_cast<std::uint64_t>(phase_counter_) << 16u) |
         (static_cast<std::uint64_t>(fall_tick_) << 24u) |
-        (static_cast<std::uint64_t>(visible_) << 32u);
+        (static_cast<std::uint64_t>(visible_) << 32u) |
+        (static_cast<std::uint64_t>(swim_tick_) << 33u) |
+        (static_cast<std::uint64_t>(drown_tick_) << 41u) |
+        (static_cast<std::uint64_t>(water_capability_) << 49u) |
+        (static_cast<std::uint64_t>(campaign_) << 51u);
 }
 
 PlayerHazardStepReport PlayerHazardRuntime::report() const noexcept {
@@ -262,6 +434,10 @@ PlayerHazardStepReport PlayerHazardRuntime::report() const noexcept {
         phase_ == PlayerHazardPhase::hole_fall &&
         fall_tick_ != 0xff) {
         result.link_frame = fall_frame(fall_tick_);
+    } else if (swimming()) {
+        result.link_frame = swim_frame(swim_tick_);
+    } else if (phase_ == PlayerHazardPhase::drowning) {
+        result.link_frame = drown_frame(campaign_, drown_tick_);
     }
     return result;
 }
@@ -272,6 +448,9 @@ const char* player_hazard_phase_name(
     case PlayerHazardPhase::normal: return "normal";
     case PlayerHazardPhase::hole_pull: return "hole-pull";
     case PlayerHazardPhase::hole_fall: return "hole-fall";
+    case PlayerHazardPhase::water_entry: return "water-entry";
+    case PlayerHazardPhase::swimming: return "swimming";
+    case PlayerHazardPhase::drowning: return "drowning";
     case PlayerHazardPhase::hidden_respawn_delay: return "hidden-respawn";
     case PlayerHazardPhase::recovery: return "recovery";
     }

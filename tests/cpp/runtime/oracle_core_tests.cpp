@@ -706,6 +706,181 @@ void test_player_hole_hazard() {
         "airborne Link ignores top-down hole terrain");
 }
 
+void test_player_water_hazard(const oracle::core::Campaign campaign) {
+    using oracle::content::LinkTileContact;
+    using oracle::content::LinkTileType;
+    using oracle::core::WorldRoomId;
+    using oracle::gameplay::PlayerCombatState;
+    using oracle::gameplay::PlayerFacing;
+    using oracle::gameplay::PlayerHazardPhase;
+    using oracle::gameplay::PlayerHazardRuntime;
+    using oracle::gameplay::PlayerState;
+    using oracle::gameplay::PlayerWaterCapability;
+
+    const auto room = WorldRoomId{.area = 0, .room = 0x55};
+    const auto respawn = PlayerState{
+        .room = room,
+        .local_x = 40.0,
+        .local_y = 40.0,
+        .facing = PlayerFacing::north,
+    };
+    auto player = PlayerState{
+        .room = room,
+        .local_x = 72.0,
+        .local_y = 56.0,
+    };
+    const auto water = LinkTileContact{
+        .room = room,
+        .type = LinkTileType::water,
+        .column = 4,
+        .row = 3,
+    };
+    const auto seawater = LinkTileContact{
+        .room = room,
+        .type = LinkTileType::seawater,
+        .column = 5,
+        .row = 3,
+    };
+    PlayerCombatState combat;
+    PlayerHazardRuntime runtime{campaign};
+    runtime.reset(respawn);
+    runtime.set_water_capability(PlayerWaterCapability::flippers);
+
+    auto step = runtime.update(player, combat, water);
+    check(
+        step.entered_water &&
+            step.began_swimming &&
+            step.phase == PlayerHazardPhase::water_entry,
+        "flippers enter the shared top-down swimming path");
+    check(
+        !step.captures_input && step.link_frame == 0x0b,
+        "water entry permits movement and selects the ROM swim frame");
+    check_close(
+        runtime.movement_speed_pixels_per_second(),
+        30.0,
+        "SPEED_80 swimming is half the ordinary cardinal speed");
+    const auto locked_input = runtime.movement_input(
+        oracle::gameplay::MovementInput{.horizontal = -1.0},
+        oracle::gameplay::PlayerFacing::east);
+    check(
+        locked_input.horizontal == 1.0 && locked_input.vertical == 0.0,
+        "water entry keeps the incoming heading during the ten-tick lock");
+
+    for (std::size_t tick = 0; tick < 9; ++tick) {
+        step = runtime.update(player, combat, water);
+    }
+    check(
+        runtime.phase() == PlayerHazardPhase::water_entry,
+        "flippers keep the retail ten-tick water-entry lock");
+    step = runtime.update(player, combat, water);
+    check(
+        runtime.phase() == PlayerHazardPhase::swimming,
+        "water entry advances to ordinary swimming after ten ticks");
+    const auto controllable_input = runtime.movement_input(
+        oracle::gameplay::MovementInput{.horizontal = -1.0},
+        oracle::gameplay::PlayerFacing::east);
+    check(
+        controllable_input.horizontal == -1.0,
+        "ordinary swimming restores live directional input");
+    for (std::size_t tick = 10; tick < 16; ++tick) {
+        step = runtime.update(player, combat, water);
+    }
+    check(
+        step.link_frame == 0x0c,
+        "swimming alternates the ROM 0B/0C frames every sixteen ticks");
+
+    step = runtime.update(player, combat, std::nullopt);
+    check(
+        step.phase == PlayerHazardPhase::normal &&
+            !runtime.swimming(),
+        "leaving water clears the swimming state");
+    check_close(
+        runtime.movement_speed_pixels_per_second(),
+        60.0,
+        "leaving water restores ordinary traversal speed");
+
+    runtime.reset(respawn);
+    runtime.set_water_capability(PlayerWaterCapability::none);
+    player.local_x = 72.0;
+    player.local_y = 56.0;
+    step = runtime.update(player, combat, water);
+    check(
+        step.entered_water &&
+            step.began_drowning &&
+            step.phase == PlayerHazardPhase::drowning,
+        "water without flippers forces the shared drowning path");
+    check(
+        step.captures_input &&
+            !player.object_contact_enabled &&
+            combat.invincibility_ticks == 0x88,
+        "drowning captures input, disables contact, and sets entry invincibility");
+    check(
+        step.link_frame ==
+            (campaign == oracle::core::Campaign::ages ? 0xd4 : 0xc8),
+        "drowning selects the campaign-relocated six-tick splash frame");
+
+    for (std::size_t tick = 0; tick < 6; ++tick) {
+        step = runtime.update(player, combat, water);
+    }
+    check(
+        step.link_frame == 0x0b,
+        "drowning splash advances to the shared sixteen-tick body frame");
+    for (std::size_t tick = 6; tick < 22; ++tick) {
+        step = runtime.update(player, combat, water);
+    }
+    check(
+        runtime.phase() == PlayerHazardPhase::hidden_respawn_delay &&
+            !runtime.visible(),
+        "6+16 drowning animation rejoins the hidden respawn path");
+    check_close(player.local_x, respawn.local_x, "drowning restores respawn X");
+    check_close(player.local_y, respawn.local_y, "drowning restores respawn Y");
+
+    step = runtime.update(player, combat, std::nullopt);
+    step = runtime.update(player, combat, std::nullopt);
+    check(
+        step.damaged && combat.health == 8,
+        "drowning removes one full heart after the hidden delay");
+    check(
+        combat.invincibility_ticks == 0x3c,
+        "drowning respawn replaces entry invincibility with sixty ticks");
+    for (std::size_t tick = 0; tick < 16; ++tick) {
+        step = runtime.update(player, combat, std::nullopt);
+    }
+    check(
+        step.recovered &&
+            runtime.phase() == PlayerHazardPhase::normal &&
+            player.object_contact_enabled,
+        "drowning completes the shared sixteen-tick recovery");
+
+    if (campaign == oracle::core::Campaign::ages) {
+        runtime.reset(respawn);
+        runtime.set_water_capability(PlayerWaterCapability::flippers);
+        step = runtime.update(player, combat, seawater);
+        check(
+            step.began_drowning,
+            "Ages seawater rejects flippers without the Mermaid Suit");
+        runtime.reset(respawn);
+        runtime.set_water_capability(PlayerWaterCapability::mermaid_suit);
+        step = runtime.update(player, combat, seawater);
+        check(
+            step.began_swimming,
+            "Ages Mermaid Suit capability permits seawater entry");
+        step = runtime.update(player, combat, seawater);
+        step = runtime.update(player, combat, seawater);
+        check(
+            step.phase == PlayerHazardPhase::swimming,
+            "Mermaid Suit uses the retail two-tick entry lock");
+    }
+
+    runtime.reset(respawn);
+    runtime.set_water_capability(PlayerWaterCapability::none);
+    player.in_air = 1;
+    step = runtime.update(player, combat, water);
+    check(
+        step.phase == PlayerHazardPhase::normal,
+        "airborne Link ignores top-down water until landing");
+}
+
 void test_room_tile_types(
     const std::filesystem::path& path,
     const oracle::core::Campaign campaign) {
@@ -2636,6 +2811,8 @@ int main() {
     test_player_traversal();
     test_feather_runtime();
     test_player_hole_hazard();
+    test_player_water_hazard(oracle::core::Campaign::ages);
+    test_player_water_hazard(oracle::core::Campaign::seasons);
     test_object_z_contact();
     test_room_tile_types(
         "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",

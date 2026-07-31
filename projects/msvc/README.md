@@ -30,10 +30,11 @@ configuration output directory as the executable.
   immediately. With the game window focused, `F5` advances through the
   scenario catalog and `Shift+F5` moves backward, without recompiling or
   changing startup projects. The catalog includes `latest`, `explore`, `chest`,
-  `vasu`, `octorok`, `hole`, and `atlas`. The hole scenario scans the supplied
-  campaign ROM for an ordinary hole with an adjacent safe spawn, so it works
-  for both Ages and Seasons without extracted or hard-coded room content. It
-  renders authentic
+  `vasu`, `octorok`, `hole`, `water`, and `atlas`. The hole and water scenarios
+  scan the supplied campaign ROM for the requested terrain with an adjacent
+  safe spawn, so they work for both Ages and Seasons without extracted or
+  hard-coded room content. In the water scenario, `F4` toggles Flippers so the
+  swim and drown branches can both be exercised. It renders authentic
   cartridge pixels plus Octorok, projectile, Link attack, and sword OAM, runs
   the shared native enemy/part/item state paths, applies enemy and projectile
   damage, and exposes `X` as the original arc-based sword swing. Defeated red

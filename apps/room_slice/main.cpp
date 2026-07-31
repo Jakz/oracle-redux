@@ -115,12 +115,14 @@ struct WindowResult {
     std::optional<oracle::room_slice::ScenarioId> requested_scenario;
 };
 
-ScenarioSpawn find_ordinary_hole_scenario(
+ScenarioSpawn find_terrain_scenario(
     const oracle::content::RoomLayoutDecoder& layout_decoder,
     const oracle::content::RoomPixelDecoder& pixel_decoder,
     const oracle::content::RoomCollisionDecoder& collision_decoder,
     const oracle::content::RoomTileTypeDecoder& tile_type_decoder,
-    const oracle::content::Season season) {
+    const oracle::content::Season season,
+    const oracle::content::LinkTileType target_type,
+    const std::string_view scenario_name) {
     struct Neighbor {
         int column_delta{};
         int row_delta{};
@@ -159,7 +161,7 @@ ScenarioSpawn find_ordinary_hole_scenario(
                      ++column) {
                     if (
                         tile_types.at(column, row) !=
-                        oracle::content::LinkTileType::hole) {
+                        target_type) {
                         continue;
                     }
                     for (const auto neighbor : neighbors) {
@@ -207,7 +209,8 @@ ScenarioSpawn find_ordinary_hole_scenario(
         }
     }
     throw std::runtime_error{
-        "supported ROM contains no reachable ordinary-hole scenario"};
+        "supported ROM contains no reachable " +
+        std::string{scenario_name} + " scenario"};
 }
 
 std::uint8_t parse_hex_byte(const std::string_view text) {
@@ -1920,6 +1923,7 @@ WindowResult run_window(
     const bool force_collision_overlay,
     const bool force_object_overlay,
     const bool chest_scenario_mode,
+    const bool water_scenario_mode,
     const std::string_view scenario_name,
     const std::optional<oracle::gameplay::PlayerFacing> scenario_facing,
     const std::uint8_t room_flags,
@@ -2387,7 +2391,12 @@ WindowResult run_window(
             : std::nullopt;
     };
     oracle::gameplay::PlayerCombatState player_combat;
-    oracle::gameplay::PlayerHazardRuntime player_hazard_runtime;
+    oracle::gameplay::PlayerHazardRuntime player_hazard_runtime{
+        rom.metadata().campaign};
+    player_hazard_runtime.set_water_capability(
+        water_scenario_mode
+        ? oracle::gameplay::PlayerWaterCapability::flippers
+        : oracle::gameplay::PlayerWaterCapability::none);
     player_hazard_runtime.reset(current_player);
     oracle::gameplay::PlayerHazardStepReport last_hazard_step;
     oracle::gameplay::OctorokStepReport last_combat_step;
@@ -2726,6 +2735,17 @@ WindowResult run_window(
                 event.type == SDL_EVENT_KEY_DOWN &&
                 event.key.key == SDLK_F3) {
                 object_overlay = !object_overlay;
+            } else if (
+                event.type == SDL_EVENT_KEY_DOWN &&
+                event.key.key == SDLK_F4 &&
+                water_scenario_mode &&
+                !event.key.repeat) {
+                const auto next_capability =
+                    player_hazard_runtime.water_capability() ==
+                        oracle::gameplay::PlayerWaterCapability::flippers
+                    ? oracle::gameplay::PlayerWaterCapability::none
+                    : oracle::gameplay::PlayerWaterCapability::flippers;
+                player_hazard_runtime.set_water_capability(next_capability);
             } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
                 current.zoom = std::clamp(
                     current.zoom * std::pow(1.15, event.wheel.y),
@@ -2759,15 +2779,18 @@ WindowResult run_window(
             if (player_mode) {
                 const auto hazard_captures_input =
                     player_hazard_runtime.captures_input();
+                const auto hazard_blocks_actions =
+                    hazard_captures_input ||
+                    player_hazard_runtime.swimming();
                 vasu_runtime.update(
-                    hazard_captures_input
+                    hazard_blocks_actions
                         ? oracle::input::InputFrame{}
                         : input_frame,
                     current_player,
                     current_actors);
                 const auto gameplay_input =
                     (vasu_runtime.captures_input() ||
-                     hazard_captures_input)
+                     hazard_blocks_actions)
                     ? oracle::input::InputFrame{}
                     : input_frame;
                 const auto chest_step = chest_runtime.update(
@@ -2810,28 +2833,29 @@ WindowResult run_window(
                 const auto actor_collision_bodies =
                     oracle::gameplay::collect_actor_collision_bodies(
                         current_actors);
+                auto movement_input = oracle::gameplay::MovementInput{
+                    .horizontal = horizontal,
+                    .vertical = vertical,
+                };
+                if (
+                    vasu_runtime.captures_input() ||
+                    hazard_captures_input ||
+                    last_sword_step.pose.has_value()) {
+                    movement_input = {};
+                } else {
+                    movement_input = player_hazard_runtime.movement_input(
+                        movement_input,
+                        current_player.facing);
+                }
                 const auto traversal =
                     oracle::gameplay::PlayerTraversal::step(
                         current_player,
-                        oracle::gameplay::MovementInput{
-                            .horizontal =
-                                (
-                                    vasu_runtime.captures_input() ||
-                                    hazard_captures_input ||
-                                    last_sword_step.pose.has_value())
-                                ? 0.0
-                                : horizontal,
-                            .vertical =
-                                (
-                                    vasu_runtime.captures_input() ||
-                                    hazard_captures_input ||
-                                    last_sword_step.pose.has_value())
-                                ? 0.0
-                                : vertical,
-                        },
+                        movement_input,
                         logic_step,
                         collision_lookup,
-                        actor_collision_bodies.bodies());
+                        actor_collision_bodies.bodies(),
+                        player_hazard_runtime.
+                            movement_speed_pixels_per_second());
                 player_moving = traversal.moved;
                 if (traversal.crossed_room_seam) {
                     reload_current_objects();
@@ -2850,8 +2874,7 @@ WindowResult run_window(
                 }
                 player_moving =
                     player_moving &&
-                    last_hazard_step.phase ==
-                        oracle::gameplay::PlayerHazardPhase::normal;
+                    !last_hazard_step.captures_input;
                 warp_cooldown =
                     std::max(0.0, warp_cooldown - logic_step);
 
@@ -3294,10 +3317,13 @@ WindowResult run_window(
             ? "ROM runtime [" + std::string{scenario_name} +
                   "] | F5/Shift+F5: scenario | WASD/arrows: move | Z/Enter: act | X: sword/back"
             : "Authentic ROM pixels | F5/Shift+F5: scenario | WASD/arrows: pan | wheel: zoom";
-        const std::string line_two =
+        std::string line_two =
             diagnostic
             ? "F1: authentic view | R: reset | mode: diagnostic"
             : "F1: diagnostic view | R: reset | mode: authentic";
+        if (water_scenario_mode) {
+            line_two += " | F4: toggle flippers";
+        }
         std::ostringstream diagnostic_line;
         diagnostic_line
             << (collision_overlay
@@ -3320,6 +3346,15 @@ WindowResult run_window(
             << player_combat.rupees
             << " | FPS " << std::fixed << std::setprecision(1)
             << measured_fps;
+        if (water_scenario_mode) {
+            diagnostic_line
+                << " | flippers "
+                << (
+                    player_hazard_runtime.water_capability() ==
+                        oracle::gameplay::PlayerWaterCapability::flippers
+                    ? "on"
+                    : "off");
+        }
         if (
             last_hazard_step.phase !=
             oracle::gameplay::PlayerHazardPhase::normal) {
@@ -3558,6 +3593,7 @@ int main(int argc, char* argv[]) {
         bool vasu_scenario_mode = false;
         bool chest_scenario_mode = false;
         bool octorok_scenario_mode = false;
+        bool water_scenario_mode = false;
         bool manual_world_selection = false;
         bool scenario_menu = false;
         bool list_scenarios = false;
@@ -3721,9 +3757,13 @@ int main(int argc, char* argv[]) {
             vasu_scenario_mode = false;
             chest_scenario_mode = false;
             octorok_scenario_mode = false;
+            water_scenario_mode = false;
             if (selected_scenario.has_value()) {
                 switch (*selected_scenario) {
                 case oracle::room_slice::ScenarioId::latest:
+                case oracle::room_slice::ScenarioId::water:
+                    water_scenario_mode = true;
+                    break;
                 case oracle::room_slice::ScenarioId::chest:
                     chest_scenario_mode = true;
                     break;
@@ -3789,9 +3829,23 @@ int main(int argc, char* argv[]) {
                 force_object_overlay = false;
             }
             if (selected_scenario == oracle::room_slice::ScenarioId::hole) {
-                const auto scenario = find_ordinary_hole_scenario(
+                const auto scenario = find_terrain_scenario(
                     layout_decoder, pixel_decoder, collision_decoder,
-                    tile_type_decoder, season);
+                    tile_type_decoder, season,
+                    oracle::content::LinkTileType::hole,
+                    "ordinary-hole");
+                world_group = static_cast<std::uint8_t>(scenario.room.area);
+                center_room = static_cast<std::uint8_t>(scenario.room.room);
+                spawn_position = scenario.packed_position;
+                scenario_facing = scenario.facing;
+                force_object_overlay = false;
+            }
+            if (water_scenario_mode) {
+                const auto scenario = find_terrain_scenario(
+                    layout_decoder, pixel_decoder, collision_decoder,
+                    tile_type_decoder, season,
+                    oracle::content::LinkTileType::water,
+                    "water");
                 world_group = static_cast<std::uint8_t>(scenario.room.area);
                 center_room = static_cast<std::uint8_t>(scenario.room.room);
                 spawn_position = scenario.packed_position;
@@ -4038,7 +4092,8 @@ int main(int argc, char* argv[]) {
                 topology_decoder, season, center_room, atlas_mode,
                 large_room_mode, player_mode, force_diagnostic,
                 force_collision_overlay, force_object_overlay,
-                chest_scenario_mode, selected_scenario_name, scenario_facing,
+                chest_scenario_mode, water_scenario_mode,
+                selected_scenario_name, scenario_facing,
                 room_flags, animation_tick, screenshot_path, benchmark_frames,
                 spawn_position);
             if (!window_result.requested_scenario.has_value()) {

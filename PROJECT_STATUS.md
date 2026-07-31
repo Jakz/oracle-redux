@@ -13,10 +13,13 @@ authentic rooms and a widescreen world view, move Link through decoded terrain
 and transitions, run the Vasu interaction, fight an Octorok with the sword,
 open a persistent ROM-defined chest, and use the level-one Roc's Feather.
 
-The latest gameplay checkpoint consumes the ROM-derived hole terrain through
-the shared retail pull, 16/10/10 fall animation, hidden local respawn, one-heart
-damage, 60-tick invulnerability, and 16-tick recovery path. Saved local
-respawn coordinates are explicit room/warp checkpoints rather than a moving
+The latest gameplay checkpoint consumes ROM-derived top-down water through a
+capability-aware Flippers/Mermaid Suit policy, retail `SPEED_80` swimming,
+campaign ROM swim/drown frames, and the shared hidden local respawn, one-heart
+damage, 60-tick invulnerability, and 16-tick recovery path. The `water`
+scenario locates a safe edge from either supplied ROM and lets `F4` toggle
+Flippers to exercise both swimming and drowning. Saved local respawn
+coordinates remain explicit room/warp checkpoints rather than a moving
 “last safe tile.”
 
 The current structural checkpoint groups implementation files by responsibility
@@ -29,15 +32,15 @@ persistence, audio, presentation, UI, campaign-content, and verification.
 `python tools/slice_status.py` validates and summarizes the live matrix.
 The MSVC room-slice launch starts the latest scenario immediately. `F5` and
 `Shift+F5` switch forward and backward at runtime across the latest integrated
-room, exploration, chest, Vasu, Octorok, ROM-derived ordinary hole, and
+room, exploration, chest, Vasu, Octorok, ROM-derived ordinary hole, water, and
 whole-world atlas paths without changing startup projects or recompiling.
 Every application, engine, and public-header file is explicitly visible under
 the `OracleRoomSlice/src` filter tree rather than hidden behind project globs.
 
 ## Resume in the next session
 
-The last implementation checkpoint is commit `f03c34e`. The worktree should
-be clean. Begin by reading this file, `docs/development/conventions.md`,
+The water implementation checkpoint is the repository tip. The worktree
+should be clean. Begin by reading this file, `docs/development/conventions.md`,
 `docs/development/slice-management.md`, and then run:
 
 ```powershell
@@ -45,21 +48,22 @@ git status --short
 python tools/slice_status.py
 ```
 
-The next bounded gameplay slice is `water-swimming-drowning`. Before writing
-the runtime, map the retail water-entry, flipper-capability, swim-movement,
-drowning, damage, and respawn branches for both US ROMs. Start from:
+The next bounded gameplay slice is `lava-lifecycle`. Before writing the
+runtime, map the shared lava entry, campaign-specific immunity gates, forced
+drowning animation, damage, and respawn branches for both US ROMs. Start from:
 
 - `docs/reverse-engineering/link-tile-types-and-z-contact.md`;
+- `docs/reverse-engineering/water-swimming-and-drowning.md`;
 - `docs/architecture/player-traversal.md`;
 - `include/oracle/gameplay/player_hazard_runtime.h` and its implementation;
-- the ordinary-hole runtime/tests as the state-machine integration pattern.
+- the water and ordinary-hole runtime/tests as integration patterns.
 
 Keep the result backend-neutral and split retail research from uncertain
-behavior. Add headless dual-campaign tests and a ROM-derived `water` developer
-scenario once the safe spawn and capability policy are pinned. New `.cpp` and
-`.h` files must also be added explicitly to the `OracleRoomSlice` project and
-its `src` filter tree. Do not begin the SDL_GPU/2.5D presentation work during
-this slice.
+behavior. Add headless dual-campaign tests and a ROM-derived `lava` developer
+scenario once safe-spawn and immunity policy are pinned. New `.cpp` and `.h`
+files must also be added explicitly to the `OracleRoomSlice` project and its
+`src` filter tree. Do not begin the SDL_GPU/2.5D presentation work during this
+slice.
 
 ## Completed slices
 
@@ -77,14 +81,16 @@ this slice.
 - Shared top-down Roc's Feather arc with ROM Link poses and visual elevation.
 - Separate ROM Link terrain types and Z-aware ordinary object contact.
 - Shared ordinary-hole pull, fall frames, local respawn, damage, and recovery.
+- Top-down water entry, Flippers capability, swim movement/frames, Ages
+  seawater policy, drowning, local respawn, damage, and recovery.
 - CMake and hand-maintained MSVC build paths, with the room slice as the
   practical Visual Studio launch target.
 - Machine-validated broad-spectrum slice matrix and named developer scenarios.
 
 ## Next implementation queue
 
-1. Implement water entry, flipper capability, swimming/drowning, and then lava
-   entry/damage/respawn without coupling gameplay to presentation.
+1. Implement lava entry, damage, and respawn without coupling gameplay to
+   presentation.
 2. Add trampoline and cliff-specific Feather landing policies; keep
    side-scrolling Feather and Roc's Cape as separate policies.
 3. Add the first persistence spine: Redux save envelope plus a validated,
@@ -96,9 +102,10 @@ this slice.
 
 ## Known fidelity gaps
 
-- Warp-hole topology, hole game-over/ring modifiers, water, lava, ice,
-  conveyor, current, spike, trampoline, and cliff reactions are incomplete;
-  ordinary nonfatal hole behavior is now consumed.
+- Warp-hole topology, hole/water game-over and ring modifiers, lava, ice,
+  conveyor, current, spike, trampoline, and cliff reactions are incomplete.
+  Top-down ordinary water is consumed; stroke acceleration, diving, Mermaid
+  Suit velocity, underwater transitions, and side-scrolling water remain.
 - Side-scrolling movement/Feather behavior and Seasons Roc's Cape are deferred.
 - Only representative interaction, enemy, item, part, and script families run
   natively; the campaigns are not yet completable.
@@ -133,6 +140,7 @@ benchmark frames with a locally supplied supported ROM.
 
 | Date | Slice | Result | Verification |
 | --- | --- | --- | --- |
+| 2026-07-31 | Water swimming and drowning | ROM-derived safe scenario; Flippers/Mermaid policy; `SPEED_80` swim; campaign frames; shared damage/respawn | Dual-campaign native tests, CMake, Python, both MSVC projects, both ROM scenario smoke tests |
 | 2026-07-31 | MSVC visibility and runtime scenario switching | Explicit `OracleRoomSlice/src` tree; F5/Shift+F5 hot scenario reconstruction | Python project/catalog checks, CMake, MSVC, CTest, injected F5 launch smoke test |
 | 2026-07-31 | Slice matrix and scenario selector | 31 cross-subsystem entries plus named/interactive dual-campaign developer scenarios | CMake/native tests, Python catalog checks, both MSVC projects, all scenario smoke tests |
 | 2026-07-31 | Ordinary hole lifecycle | Shared pull, retail fall frames, hidden checkpoint respawn, damage and recovery | CMake/native tests, Python, both MSVC projects, launch smoke test |

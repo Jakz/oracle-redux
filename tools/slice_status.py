@@ -12,7 +12,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "specs" / "slices.json"
-SCENARIOS = {"latest", "explore", "chest", "vasu", "octorok", "hole", "atlas"}
+SCENARIOS = {
+    "latest", "explore", "chest", "vasu", "octorok", "hole", "water", "atlas"
+}
 CAMPAIGNS = {"ages", "seasons"}
 
 

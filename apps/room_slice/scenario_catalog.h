@@ -14,6 +14,7 @@ enum class ScenarioId {
     vasu,
     octorok,
     hole,
+    water,
     atlas,
 };
 

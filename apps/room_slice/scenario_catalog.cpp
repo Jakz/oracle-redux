@@ -14,7 +14,7 @@ constexpr std::array scenarios{
         ScenarioId::latest,
         "latest",
         "Latest integrated slice",
-        "Current recommended playable checkpoint (currently the chest room).",
+        "Current recommended playable checkpoint (currently water traversal).",
     },
     ScenarioDescriptor{
         ScenarioId::explore,
@@ -45,6 +45,12 @@ constexpr std::array scenarios{
         "hole",
         "Ordinary hole lifecycle",
         "Spawn beside a ROM-derived hole and walk into it to test respawn.",
+    },
+    ScenarioDescriptor{
+        ScenarioId::water,
+        "water",
+        "Water swimming and drowning",
+        "Spawn beside ROM-derived water; F4 toggles the Flippers capability.",
     },
     ScenarioDescriptor{
         ScenarioId::atlas,

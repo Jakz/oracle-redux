@@ -70,8 +70,12 @@ Terrain traversal remains responsible for enterability, while
 `PlayerHazardRuntime` consumes the typed terrain contact after movement.
 Ordinary holes disable the separate object-contact channel during fall and
 recovery without turning the terrain wall probes into a hazard state machine.
-Raised-floor, swimming, lava, and other policy changes remain explicit future
-gameplay states rather than presentation shortcuts.
+Top-down water now selects a capability-aware swim or drowning state through
+the same boundary. Flippers use retail `SPEED_80` movement (30 pixels per
+second), action input is suppressed while directional movement remains live,
+and drowning rejoins the shared hidden-respawn/damage/recovery path. Lava,
+raised floors, and other terrain policies remain explicit gameplay states
+rather than presentation shortcuts.
 
 ## Seam crossing
 
@@ -101,7 +105,7 @@ Current controls:
 - `F2` toggles the collision overlay;
 - `F3` toggles unresolved room-object spawn anchors.
 
-Standing, walking, Feather, sword, and ordinary hole falling select original
-Link graphics frames. The room slice hides Link during the retail local
-respawn delay, but gameplay owns that visibility decision; the renderer only
-consumes it.
+Standing, walking, Feather, sword, swimming, drowning, and ordinary hole
+falling select original Link graphics frames. The room slice hides Link during
+the retail local respawn delay, but gameplay owns that visibility decision;
+the renderer only consumes it.
