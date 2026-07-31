@@ -34,6 +34,33 @@ whole-world atlas paths without changing startup projects or recompiling.
 Every application, engine, and public-header file is explicitly visible under
 the `OracleRoomSlice/src` filter tree rather than hidden behind project globs.
 
+## Resume in the next session
+
+The last implementation checkpoint is commit `f03c34e`. The worktree should
+be clean. Begin by reading this file, `docs/development/conventions.md`,
+`docs/development/slice-management.md`, and then run:
+
+```powershell
+git status --short
+python tools/slice_status.py
+```
+
+The next bounded gameplay slice is `water-swimming-drowning`. Before writing
+the runtime, map the retail water-entry, flipper-capability, swim-movement,
+drowning, damage, and respawn branches for both US ROMs. Start from:
+
+- `docs/reverse-engineering/link-tile-types-and-z-contact.md`;
+- `docs/architecture/player-traversal.md`;
+- `include/oracle/gameplay/player_hazard_runtime.h` and its implementation;
+- the ordinary-hole runtime/tests as the state-machine integration pattern.
+
+Keep the result backend-neutral and split retail research from uncertain
+behavior. Add headless dual-campaign tests and a ROM-derived `water` developer
+scenario once the safe spawn and capability policy are pinned. New `.cpp` and
+`.h` files must also be added explicitly to the `OracleRoomSlice` project and
+its `src` filter tree. Do not begin the SDL_GPU/2.5D presentation work during
+this slice.
+
 ## Completed slices
 
 - ROM validation, campaign cataloguing, routine-overlap analysis, and the
