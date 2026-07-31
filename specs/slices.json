@@ -48,6 +48,20 @@
       "gaps": []
     },
     {
+      "id": "developer-scenario-harness",
+      "track": "verification",
+      "title": "Browsable MSVC source tree and runtime scenario switching",
+      "status": "verified",
+      "priority": "now",
+      "playability": "verification",
+      "campaigns": ["ages", "seasons"],
+      "scenarios": ["latest", "explore", "chest", "vasu", "octorok", "hole", "atlas"],
+      "evidence": ["docs/development/slice-management.md", "projects/msvc/README.md"],
+      "verification": ["tests/test_msvc_projects.py", "tests/test_slice_catalog.py"],
+      "depends_on": ["rom-source-boundary"],
+      "gaps": []
+    },
+    {
       "id": "authentic-room-rendering",
       "track": "world",
       "title": "Authentic ROM room rendering",

@@ -47,7 +47,7 @@
     <TargetName>oracle_room_slice</TargetName>
     <LocalDebuggerWorkingDirectory>$(OracleRoot)</LocalDebuggerWorkingDirectory>
     <OracleRomPath Condition="'$(OracleRomPath)'==''">$(OracleRoot)roms\Legend of Zelda, The - Oracle of Ages (USA).gbc</OracleRomPath>
-    <OracleScenarioArguments Condition="'$(OracleScenarioArguments)'==''">--scenario-menu</OracleScenarioArguments>
+    <OracleScenarioArguments Condition="'$(OracleScenarioArguments)'==''">--scenario latest</OracleScenarioArguments>
     <LocalDebuggerCommandArguments>&quot;$(OracleRomPath)&quot; $(OracleScenarioArguments)</LocalDebuggerCommandArguments>
   </PropertyGroup>
 
@@ -58,10 +58,97 @@
   </ItemDefinitionGroup>
 
   <ItemGroup>
-    <ClCompile Include="$(OracleRoot)apps\room_slice\*.cpp" />
-    <ClInclude Include="$(OracleRoot)apps\room_slice\*.h" />
-    <ClCompile Include="$(OracleRoot)src\**\*.cpp" />
-    <ClInclude Include="$(OracleRoot)include\oracle\**\*.h" />
+    <ClCompile Include="$(OracleRoot)apps\room_slice\main.cpp" />
+    <ClCompile Include="$(OracleRoot)apps\room_slice\scenario_catalog.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\actors\chest_data.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\actors\enemy_data.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\actors\part_data.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\rom\game_boy_tiles.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\rom\rom_source.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\rom\rom_text.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\sprites\enemy_sprite.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\sprites\interaction_sprite.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\sprites\link_sprite.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\sprites\part_sprite.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\sprites\sword_sprite.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\world\room_collisions.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\world\room_layout.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\world\room_mutations.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\world\room_objects.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\world\room_pixels.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\world\room_tile_types.cpp" />
+    <ClCompile Include="$(OracleRoot)src\content\world\room_topology.cpp" />
+    <ClCompile Include="$(OracleRoot)src\core\actors\actor_slot_domain.cpp" />
+    <ClCompile Include="$(OracleRoot)src\core\items\item_campaign_policy.cpp" />
+    <ClCompile Include="$(OracleRoot)src\core\items\item_runtime.cpp" />
+    <ClCompile Include="$(OracleRoot)src\core\world\simulation_region.cpp" />
+    <ClCompile Include="$(OracleRoot)src\experience\experience_settings.cpp" />
+    <ClCompile Include="$(OracleRoot)src\gameplay\actors\actor_collision.cpp" />
+    <ClCompile Include="$(OracleRoot)src\gameplay\actors\object_contact.cpp" />
+    <ClCompile Include="$(OracleRoot)src\gameplay\actors\room_actor_loader.cpp" />
+    <ClCompile Include="$(OracleRoot)src\gameplay\combat\octorok_runtime.cpp" />
+    <ClCompile Include="$(OracleRoot)src\gameplay\combat\sword_runtime.cpp" />
+    <ClCompile Include="$(OracleRoot)src\gameplay\interactions\interaction_target.cpp" />
+    <ClCompile Include="$(OracleRoot)src\gameplay\interactions\vasu_interaction.cpp" />
+    <ClCompile Include="$(OracleRoot)src\gameplay\items\chest_runtime.cpp" />
+    <ClCompile Include="$(OracleRoot)src\gameplay\items\feather_runtime.cpp" />
+    <ClCompile Include="$(OracleRoot)src\gameplay\player\player_hazard_runtime.cpp" />
+    <ClCompile Include="$(OracleRoot)src\gameplay\player\player_traversal.cpp" />
+    <ClCompile Include="$(OracleRoot)src\input\input_frame.cpp" />
+    <ClCompile Include="$(OracleRoot)src\presentation\camera\camera.cpp" />
+    <ClCompile Include="$(OracleRoot)src\presentation\camera\world_viewport.cpp" />
+    <ClCompile Include="$(OracleRoot)src\presentation\render\render_plan.cpp" />
+    <ClCompile Include="$(OracleRoot)src\presentation\timing\frame_timing.cpp" />
+    <ClCompile Include="$(OracleRoot)src\script\runtime\campaign_script.cpp" />
+    <ClCompile Include="$(OracleRoot)src\script\state\original_state.cpp" />
+    <ClInclude Include="$(OracleRoot)apps\room_slice\scenario_catalog.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\chest_data.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\enemy_data.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\enemy_sprite.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\game_boy_tiles.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\interaction_sprite.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\link_sprite.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\part_data.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\part_sprite.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\rom_source.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\rom_text.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\room_collisions.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\room_layout.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\room_mutations.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\room_objects.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\room_pixels.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\room_tile_types.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\room_topology.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\content\sword_sprite.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\core\actor_slot_domain.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\core\campaign.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\core\item_campaign_policy.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\core\item_runtime.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\core\item_state.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\core\simulation_region.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\core\world_id.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\experience_settings.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\actor_collision.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\chest_runtime.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\feather_runtime.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\interaction_target.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\object_contact.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\octorok_runtime.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\player_combat_state.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\player_hazard_runtime.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\player_traversal.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\room_actor_loader.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\sword_runtime.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\vasu_interaction.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\input\input_frame.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\presentation\camera.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\presentation\frame_timing.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\presentation\render_plan.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\presentation\world_scene.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\presentation\world_viewport.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\script\campaign_script.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\script\original_state.h" />
+    <ClInclude Include="$(OracleRoot)include\oracle\ui\dialogue_model.h" />
   </ItemGroup>
 
   <ItemGroup>

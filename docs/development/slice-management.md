@@ -62,8 +62,10 @@ playability remains absent.
 
 The room slice exposes named scenarios from
 `apps/room_slice/scenario_catalog.cpp`. `--scenario NAME` is stable for scripts
-and smoke tests, while `--scenario-menu` is the Visual Studio default. Legacy
-flags remain compatibility aliases.
+and smoke tests, while `--scenario-menu` remains available for console use.
+Visual Studio starts `latest` immediately; focused in-game `F5`/`Shift+F5`
+cycles through the catalog and reconstructs the selected scenario from the
+ROM. Legacy flags remain compatibility aliases.
 
 Every newly testable player-facing feature should either:
 

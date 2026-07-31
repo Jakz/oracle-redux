@@ -79,6 +79,22 @@ std::optional<ScenarioId> scenario_from_name(
     return std::nullopt;
 }
 
+ScenarioId cycle_scenario(
+    const ScenarioId current,
+    const int direction) noexcept {
+    std::size_t current_index = 0;
+    for (std::size_t index = 0; index < scenarios.size(); ++index) {
+        if (scenarios[index].id == current) {
+            current_index = index;
+            break;
+        }
+    }
+    const auto count = static_cast<int>(scenarios.size());
+    const auto next =
+        (static_cast<int>(current_index) + direction % count + count) % count;
+    return scenarios[static_cast<std::size_t>(next)].id;
+}
+
 void print_scenario_catalog(std::ostream& output) {
     output << "Available Oracle Redux scenarios:\n";
     for (std::size_t index = 0; index < scenarios.size(); ++index) {

@@ -25,10 +25,11 @@ configuration output directory as the executable.
 ## Projects
 
 - `OracleRoomSlice` builds the interactive BYO-ROM renderer. It is the default
-  project to run and has the local Ages US path plus `--scenario-menu`
-  configured as its debugger arguments. Press `F5`, choose a scenario by
-  number or name in the console, and keep the same startup project for every
-  implemented feature. The menu includes `latest`, `explore`, `chest`,
+  project to run and has the local Ages US path plus `--scenario latest`
+  configured as its debugger arguments. Visual Studio `F5` launches the game
+  immediately. With the game window focused, `F5` advances through the
+  scenario catalog and `Shift+F5` moves backward, without recompiling or
+  changing startup projects. The catalog includes `latest`, `explore`, `chest`,
   `vasu`, `octorok`, `hole`, and `atlas`. The hole scenario scans the supplied
   campaign ROM for an ordinary hole with an adjacent safe spawn, so it works
   for both Ages and Seasons without extracted or hard-coded room content. It
@@ -52,10 +53,10 @@ configuration output directory as the executable.
 
 To test Seasons, open `OracleRoomSlice` properties, select **Debugging**, and
 replace the ROM path in the evaluated command arguments while keeping
-`--scenario-menu`. Visual Studio stores this local override outside Git. For
-a fixed automated launch, replace the menu argument with `--scenario
-octorok` (or another name). Run `--list-scenarios` to print the complete
-catalog and exit.
+`--scenario latest`. Visual Studio stores this local override outside Git. For
+a fixed launch, replace `latest` with `octorok` (or another name). Use
+`--scenario-menu` when an initial console prompt is preferable, or
+`--list-scenarios` to print the catalog and exit.
 
 To measure performance without manually closing the window, append
 `--benchmark-frames 120` to the debugger arguments. The console reports total
@@ -84,8 +85,9 @@ Outputs are written to `projects/msvc/x64/Debug` or
 `projects/msvc/x64/Release`. Those directories and Visual Studio's local `.vs`
 state are ignored.
 
-The project files use recursive source globs. New engine `.cpp` files anywhere
-under `src`, native test `.cpp` files under `tests/cpp`, and public `.h` files
-under `include/oracle` are picked up without manually editing the project.
-Place new files according to `docs/development/conventions.md` and add a
-matching filter entry when introducing a durable responsibility folder.
+`OracleRoomSlice` explicitly lists every application `.cpp`, engine `.cpp`, and
+public `.h` file so Solution Explorer reliably displays them under its `src`
+filter and functional subfolders. Add new files to both the project and its
+`.filters` sidecar. The Python project test fails if either list falls behind
+the filesystem. `OracleRuntimeTests` retains recursive source globs for broad
+headless coverage.

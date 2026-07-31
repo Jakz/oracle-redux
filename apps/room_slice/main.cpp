@@ -111,6 +111,10 @@ struct ScenarioSpawn {
         oracle::gameplay::PlayerFacing::south};
 };
 
+struct WindowResult {
+    std::optional<oracle::room_slice::ScenarioId> requested_scenario;
+};
+
 ScenarioSpawn find_ordinary_hole_scenario(
     const oracle::content::RoomLayoutDecoder& layout_decoder,
     const oracle::content::RoomPixelDecoder& pixel_decoder,
@@ -1896,7 +1900,7 @@ void save_region_bmp(
         << "export_height=" << region.height << '\n';
 }
 
-int run_window(
+WindowResult run_window(
     const oracle::content::RomSource& rom,
     std::vector<RoomPlacement> rooms,
     std::vector<oracle::content::RoomCollisionMap> collisions,
@@ -2614,6 +2618,7 @@ int run_window(
     double benchmark_update_seconds = 0.0;
     double benchmark_render_seconds = 0.0;
     double benchmark_present_seconds = 0.0;
+    std::optional<oracle::room_slice::ScenarioId> requested_scenario;
 
     while (running) {
         const auto profile_frame_start = SDL_GetPerformanceCounter();
@@ -2636,6 +2641,20 @@ int run_window(
             } else if (
                 event.type == SDL_EVENT_KEY_DOWN &&
                 event.key.key == SDLK_ESCAPE) {
+                running = false;
+            } else if (
+                event.type == SDL_EVENT_KEY_DOWN &&
+                event.key.key == SDLK_F5 &&
+                !event.key.repeat) {
+                const auto current_scenario =
+                    oracle::room_slice::scenario_from_name(scenario_name)
+                        .value_or(oracle::room_slice::ScenarioId::latest);
+                const auto direction =
+                    (event.key.mod & SDL_KMOD_SHIFT) != 0 ? -1 : 1;
+                requested_scenario =
+                    oracle::room_slice::cycle_scenario(
+                        current_scenario,
+                        direction);
                 running = false;
             } else if (
                 event.type == SDL_EVENT_KEY_DOWN &&
@@ -3273,8 +3292,8 @@ int run_window(
         SDL_SetRenderDrawColor(renderer, 232, 238, 248, SDL_ALPHA_OPAQUE);
         const std::string line_one = player_mode
             ? "ROM runtime [" + std::string{scenario_name} +
-                  "] | WASD/arrows: move | Z/Enter: open/talk | X: sword/back"
-            : "Authentic ROM pixels | WASD/arrows: pan | wheel: zoom";
+                  "] | F5/Shift+F5: scenario | WASD/arrows: move | Z/Enter: act | X: sword/back"
+            : "Authentic ROM pixels | F5/Shift+F5: scenario | WASD/arrows: pan | wheel: zoom";
         const std::string line_two =
             diagnostic
             ? "F1: authentic view | R: reset | mode: diagnostic"
@@ -3496,7 +3515,9 @@ int run_window(
     SDL_DestroyGPUDevice(gpu_device);
     SDL_DestroyWindow(window);
     SDL_Quit();
-    return EXIT_SUCCESS;
+    return WindowResult{
+        .requested_scenario = requested_scenario,
+    };
 }
 
 }  // namespace
@@ -3676,434 +3697,360 @@ int main(int argc, char* argv[]) {
                 "--scenario-menu cannot be combined with --scenario"};
         }
         if (scenario_menu) {
-            selected_scenario = oracle::room_slice::select_scenario(
-                std::cin,
-                std::cout);
+            selected_scenario =
+                oracle::room_slice::select_scenario(std::cin, std::cout);
         }
         if (!manual_world_selection && !selected_scenario.has_value()) {
             selected_scenario = oracle::room_slice::ScenarioId::latest;
         }
-        if (selected_scenario.has_value()) {
-            switch (*selected_scenario) {
-            case oracle::room_slice::ScenarioId::latest:
-            case oracle::room_slice::ScenarioId::chest:
-                chest_scenario_mode = true;
-                break;
-            case oracle::room_slice::ScenarioId::vasu:
-                vasu_scenario_mode = true;
-                break;
-            case oracle::room_slice::ScenarioId::octorok:
-                octorok_scenario_mode = true;
-                break;
-            case oracle::room_slice::ScenarioId::explore:
-                manual_world_selection = true;
-                break;
-            case oracle::room_slice::ScenarioId::hole:
-                break;
-            case oracle::room_slice::ScenarioId::atlas:
-                manual_world_selection = true;
-                atlas_mode = true;
-                break;
-            }
-        }
-        if (world_group >= 8) {
-            throw std::invalid_argument{
-                "world group must be between 0 and 7"};
-        }
-        if (region_output_path.has_value() && force_diagnostic) {
-            throw std::invalid_argument{
-                "region export requires authentic ROM rendering"};
-        }
+        const auto configured_world_group = world_group;
+        const auto configured_center_room = center_room;
+        const auto configured_manual_world_selection = manual_world_selection;
+        const auto configured_atlas_mode = atlas_mode;
+        const auto configured_force_object_overlay = force_object_overlay;
+        const auto configured_spawn_position = spawn_position;
 
-        const auto rom = oracle::content::RomSource::load(rom_path);
-        const oracle::content::RoomLayoutDecoder layout_decoder{rom};
-        const oracle::content::RoomPixelDecoder pixel_decoder{rom};
-        const oracle::content::RoomCollisionDecoder collision_decoder{rom};
-        const oracle::content::RoomMutationDecoder mutation_decoder{rom};
-        const oracle::content::RoomObjectDecoder object_decoder{rom};
-        const oracle::content::RoomTopologyDecoder topology_decoder{rom};
-        const oracle::content::RoomTileTypeDecoder tile_type_decoder{rom};
-        if (vasu_scenario_mode) {
-            const auto scenario =
-                oracle::gameplay::vasu_scenario(
-                    rom.metadata().campaign);
-            world_group =
-                static_cast<std::uint8_t>(scenario.room.area);
-            center_room =
-                static_cast<std::uint8_t>(scenario.room.room);
-            spawn_position = scenario.player_spawn_yx;
-            scenario_facing = oracle::gameplay::PlayerFacing::north;
-            force_object_overlay = false;
-        }
-        if (chest_scenario_mode) {
-            const auto scenario =
-                oracle::gameplay::chest_scenario(
-                    rom.metadata().campaign);
-            world_group =
-                static_cast<std::uint8_t>(scenario.room.area);
-            center_room =
-                static_cast<std::uint8_t>(scenario.room.room);
-            spawn_position = scenario.player_spawn_yx;
-            scenario_facing = oracle::gameplay::PlayerFacing::north;
-            force_object_overlay = false;
-        }
-        if (octorok_scenario_mode) {
-            const auto scenario =
-                oracle::gameplay::octorok_scenario(
-                    rom.metadata().campaign);
-            world_group =
-                static_cast<std::uint8_t>(scenario.room.area);
-            center_room =
-                static_cast<std::uint8_t>(scenario.room.room);
-            spawn_position = scenario.player_spawn_yx;
-            scenario_facing = oracle::gameplay::PlayerFacing::north;
-            force_object_overlay = false;
-        }
-        if (
-            selected_scenario ==
-            oracle::room_slice::ScenarioId::hole) {
-            const auto scenario = find_ordinary_hole_scenario(
-                layout_decoder,
-                pixel_decoder,
-                collision_decoder,
-                tile_type_decoder,
-                season);
-            world_group = static_cast<std::uint8_t>(scenario.room.area);
-            center_room = static_cast<std::uint8_t>(scenario.room.room);
-            spawn_position = scenario.packed_position;
-            scenario_facing = scenario.facing;
-            force_object_overlay = false;
-        }
-        const auto selected_scenario_name = selected_scenario.has_value()
-            ? oracle::room_slice::describe_scenario(*selected_scenario).name
-            : std::string_view{"custom"};
-        std::cout << "scenario=" << selected_scenario_name << '\n';
-        const auto destination_variant =
-            static_cast<std::uint8_t>(season);
-        if (catalog_topology) {
-            print_topology_catalog(
-                topology_decoder,
-                destination_variant);
-        }
-        if (catalog_objects) {
-            print_object_catalog(object_decoder, room_flags);
-        }
-        if (follow_exit_index.has_value()) {
-            const auto source_exits =
-                topology_decoder.exits(
-                    world_group,
-                    center_room,
-                    destination_variant);
-            if (*follow_exit_index >= source_exits.size()) {
-                throw std::out_of_range{
-                    "follow-exit index exceeds the room exit list"};
+        for (;;) {
+            world_group = configured_world_group;
+            center_room = configured_center_room;
+            manual_world_selection = configured_manual_world_selection;
+            atlas_mode = configured_atlas_mode;
+            force_object_overlay = configured_force_object_overlay;
+            spawn_position = configured_spawn_position;
+            scenario_facing.reset();
+            vasu_scenario_mode = false;
+            chest_scenario_mode = false;
+            octorok_scenario_mode = false;
+            if (selected_scenario.has_value()) {
+                switch (*selected_scenario) {
+                case oracle::room_slice::ScenarioId::latest:
+                case oracle::room_slice::ScenarioId::chest:
+                    chest_scenario_mode = true;
+                    break;
+                case oracle::room_slice::ScenarioId::vasu:
+                    vasu_scenario_mode = true;
+                    break;
+                case oracle::room_slice::ScenarioId::octorok:
+                    octorok_scenario_mode = true;
+                    break;
+                case oracle::room_slice::ScenarioId::explore:
+                    manual_world_selection = true;
+                    break;
+                case oracle::room_slice::ScenarioId::hole:
+                    break;
+                case oracle::room_slice::ScenarioId::atlas:
+                    manual_world_selection = true;
+                    atlas_mode = true;
+                    break;
+                }
             }
-            const auto& followed = source_exits[*follow_exit_index];
-            std::cout
-                << "followed_exit=" << *follow_exit_index << '\n'
-                << "followed_kind=" << exit_kind_name(followed.kind) << '\n'
-                << "followed_source=" << std::hex << std::setw(2)
-                << std::setfill('0')
-                << static_cast<unsigned int>(world_group)
-                << ':' << std::setw(2)
-                << static_cast<unsigned int>(center_room) << '\n'
-                << "followed_destination=" << std::setw(2)
-                << static_cast<unsigned int>(followed.destination.area)
-                << ':' << std::setw(2)
-                << static_cast<unsigned int>(followed.destination.room)
-                << std::dec << '\n';
-            world_group =
-                static_cast<std::uint8_t>(followed.destination.area);
-            center_room =
-                static_cast<std::uint8_t>(followed.destination.room);
-        }
-        const auto room_exits =
-            topology_decoder.exits(
-                world_group,
-                center_room,
-                destination_variant);
-        const auto center_tileset =
-            pixel_decoder.describe_tileset(
-                world_group,
-                center_room,
-                season);
-        const bool large_room_mode =
-            layout_decoder.layout_kind(center_tileset.layout_group) ==
-            oracle::content::RoomLayoutKind::large;
-        if (atlas_mode && large_room_mode) {
-            throw std::invalid_argument{
-                "large-layout groups use individual rooms, not an atlas"};
-        }
-        const bool player_mode =
-            !atlas_mode &&
-            !describe_only &&
-            !region_output_path.has_value();
-        auto rooms = large_room_mode
-            ? decode_world_room(
-                  layout_decoder,
-                  pixel_decoder,
-                  mutation_decoder,
-                  world_group,
-                  center_room,
-                  season,
-                  room_flags)
-            : atlas_mode || player_mode
-            ? decode_world_rectangle(
-                  layout_decoder,
-                  pixel_decoder,
-                  mutation_decoder,
-                  world_group,
-                  0,
-                  15,
-                  0,
-                  15,
-                  season,
-                  room_flags)
-            : decode_world_neighborhood(
-                  layout_decoder,
-                  pixel_decoder,
-                  mutation_decoder,
-                  world_group,
-                  center_room,
-                  1,
-                  season,
-                  room_flags);
-        std::vector<oracle::content::RoomCollisionMap> collisions;
-        collisions.reserve(rooms.size());
-        for (const auto& placement : rooms) {
-            const auto tileset = pixel_decoder.describe_tileset(
-                static_cast<std::uint8_t>(placement.layout.id.area),
-                static_cast<std::uint8_t>(placement.layout.id.room),
-                season);
-            collisions.push_back(
-                collision_decoder.decode(placement.layout, tileset));
-        }
-        std::optional<RegionPixels> authentic_region;
-        if (!force_diagnostic) {
-            try {
-                authentic_region =
-                    compose_region(
-                        pixel_decoder,
-                        rooms,
-                        season,
-                        animation_tick);
-            } catch (const std::exception& error) {
-                std::cerr
-                    << "authentic renderer unavailable; using diagnostic "
-                       "fallback: "
-                    << error.what() << '\n';
+            if (world_group >= 8) {
+                throw std::invalid_argument{
+                    "world group must be between 0 and 7"};
             }
-        }
-        print_description(
-            rom,
-            rooms,
-            world_group,
-            center_room,
-            atlas_mode,
-            large_room_mode,
-            player_mode,
-            collisions,
-            authentic_region ? &*authentic_region : nullptr,
-            animation_tick,
-            room_flags);
-        print_room_exits(room_exits);
-        const auto room_objects =
-            object_decoder.decode(
-                world_group,
-                center_room,
-                room_flags);
-        const auto positioned_object_count =
-            std::count_if(
-                room_objects.records.begin(),
-                room_objects.records.end(),
-                [](const oracle::content::RoomObjectRecord& object) {
+            if (region_output_path.has_value() && force_diagnostic) {
+                throw std::invalid_argument{
+                    "region export requires authentic ROM rendering"};
+            }
+
+            const auto rom = oracle::content::RomSource::load(rom_path);
+            const oracle::content::RoomLayoutDecoder layout_decoder{rom};
+            const oracle::content::RoomPixelDecoder pixel_decoder{rom};
+            const oracle::content::RoomCollisionDecoder collision_decoder{rom};
+            const oracle::content::RoomMutationDecoder mutation_decoder{rom};
+            const oracle::content::RoomObjectDecoder object_decoder{rom};
+            const oracle::content::RoomTopologyDecoder topology_decoder{rom};
+            const oracle::content::RoomTileTypeDecoder tile_type_decoder{rom};
+            if (vasu_scenario_mode) {
+                const auto scenario =
+                    oracle::gameplay::vasu_scenario(rom.metadata().campaign);
+                world_group = static_cast<std::uint8_t>(scenario.room.area);
+                center_room = static_cast<std::uint8_t>(scenario.room.room);
+                spawn_position = scenario.player_spawn_yx;
+                scenario_facing = oracle::gameplay::PlayerFacing::north;
+                force_object_overlay = false;
+            }
+            if (chest_scenario_mode) {
+                const auto scenario =
+                    oracle::gameplay::chest_scenario(rom.metadata().campaign);
+                world_group = static_cast<std::uint8_t>(scenario.room.area);
+                center_room = static_cast<std::uint8_t>(scenario.room.room);
+                spawn_position = scenario.player_spawn_yx;
+                scenario_facing = oracle::gameplay::PlayerFacing::north;
+                force_object_overlay = false;
+            }
+            if (octorok_scenario_mode) {
+                const auto scenario =
+                    oracle::gameplay::octorok_scenario(rom.metadata().campaign);
+                world_group = static_cast<std::uint8_t>(scenario.room.area);
+                center_room = static_cast<std::uint8_t>(scenario.room.room);
+                spawn_position = scenario.player_spawn_yx;
+                scenario_facing = oracle::gameplay::PlayerFacing::north;
+                force_object_overlay = false;
+            }
+            if (selected_scenario == oracle::room_slice::ScenarioId::hole) {
+                const auto scenario = find_ordinary_hole_scenario(
+                    layout_decoder, pixel_decoder, collision_decoder,
+                    tile_type_decoder, season);
+                world_group = static_cast<std::uint8_t>(scenario.room.area);
+                center_room = static_cast<std::uint8_t>(scenario.room.room);
+                spawn_position = scenario.packed_position;
+                scenario_facing = scenario.facing;
+                force_object_overlay = false;
+            }
+            const auto selected_scenario_name =
+                selected_scenario.has_value()
+                    ? oracle::room_slice::describe_scenario(*selected_scenario)
+                          .name
+                    : std::string_view{"custom"};
+            std::cout << "scenario=" << selected_scenario_name << '\n';
+            const auto destination_variant = static_cast<std::uint8_t>(season);
+            if (catalog_topology) {
+                print_topology_catalog(topology_decoder, destination_variant);
+            }
+            if (catalog_objects) {
+                print_object_catalog(object_decoder, room_flags);
+            }
+            if (follow_exit_index.has_value()) {
+                const auto source_exits = topology_decoder.exits(
+                    world_group, center_room, destination_variant);
+                if (*follow_exit_index >= source_exits.size()) {
+                    throw std::out_of_range{
+                        "follow-exit index exceeds the room exit list"};
+                }
+                const auto &followed = source_exits[*follow_exit_index];
+                std::cout
+                    << "followed_exit=" << *follow_exit_index << '\n'
+                    << "followed_kind=" << exit_kind_name(followed.kind) << '\n'
+                    << "followed_source=" << std::hex << std::setw(2)
+                    << std::setfill('0')
+                    << static_cast<unsigned int>(world_group) << ':'
+                    << std::setw(2) << static_cast<unsigned int>(center_room)
+                    << '\n'
+                    << "followed_destination=" << std::setw(2)
+                    << static_cast<unsigned int>(followed.destination.area)
+                    << ':' << std::setw(2)
+                    << static_cast<unsigned int>(followed.destination.room)
+                    << std::dec << '\n';
+                world_group =
+                    static_cast<std::uint8_t>(followed.destination.area);
+                center_room =
+                    static_cast<std::uint8_t>(followed.destination.room);
+            }
+            const auto room_exits = topology_decoder.exits(
+                world_group, center_room, destination_variant);
+            const auto center_tileset = pixel_decoder.describe_tileset(
+                world_group, center_room, season);
+            const bool large_room_mode =
+                layout_decoder.layout_kind(center_tileset.layout_group) ==
+                oracle::content::RoomLayoutKind::large;
+            if (atlas_mode && large_room_mode) {
+                throw std::invalid_argument{
+                    "large-layout groups use individual rooms, not an atlas"};
+            }
+            const bool player_mode = !atlas_mode && !describe_only &&
+                                     !region_output_path.has_value();
+            auto rooms =
+                large_room_mode
+                    ? decode_world_room(layout_decoder, pixel_decoder,
+                                        mutation_decoder, world_group,
+                                        center_room, season, room_flags)
+                : atlas_mode || player_mode
+                    ? decode_world_rectangle(layout_decoder, pixel_decoder,
+                                             mutation_decoder, world_group, 0,
+                                             15, 0, 15, season, room_flags)
+                    : decode_world_neighborhood(
+                          layout_decoder, pixel_decoder, mutation_decoder,
+                          world_group, center_room, 1, season, room_flags);
+            std::vector<oracle::content::RoomCollisionMap> collisions;
+            collisions.reserve(rooms.size());
+            for (const auto &placement : rooms) {
+                const auto tileset = pixel_decoder.describe_tileset(
+                    static_cast<std::uint8_t>(placement.layout.id.area),
+                    static_cast<std::uint8_t>(placement.layout.id.room),
+                    season);
+                collisions.push_back(
+                    collision_decoder.decode(placement.layout, tileset));
+            }
+            std::optional<RegionPixels> authentic_region;
+            if (!force_diagnostic) {
+                try {
+                    authentic_region = compose_region(pixel_decoder, rooms,
+                                                      season, animation_tick);
+                } catch (const std::exception &error) {
+                    std::cerr
+                        << "authentic renderer unavailable; using diagnostic "
+                           "fallback: "
+                        << error.what() << '\n';
+                }
+            }
+            print_description(rom, rooms, world_group, center_room, atlas_mode,
+                              large_room_mode, player_mode, collisions,
+                              authentic_region ? &*authentic_region : nullptr,
+                              animation_tick, room_flags);
+            print_room_exits(room_exits);
+            const auto room_objects =
+                object_decoder.decode(world_group, center_room, room_flags);
+            const auto positioned_object_count = std::count_if(
+                room_objects.records.begin(), room_objects.records.end(),
+                [](const oracle::content::RoomObjectRecord &object) {
                     return object.positioned;
                 });
-        std::cout
-            << "room_object_count="
-            << room_objects.records.size() << '\n'
-            << "positioned_object_count="
-            << positioned_object_count << '\n';
-        const oracle::content::ChestDataDecoder chest_decoder{rom};
-        const auto chest = chest_decoder.find(
-            oracle::core::WorldRoomId{
+            std::cout << "room_object_count=" << room_objects.records.size()
+                      << '\n'
+                      << "positioned_object_count=" << positioned_object_count
+                      << '\n';
+            const oracle::content::ChestDataDecoder chest_decoder{rom};
+            const auto chest = chest_decoder.find(oracle::core::WorldRoomId{
                 .area = world_group,
                 .room = center_room,
             });
-        if (chest.has_value()) {
-            const auto treasure =
-                chest_decoder.describe_treasure(*chest);
-            std::cout
-                << "chest_position=" << std::hex << std::setw(2)
-                << std::setfill('0')
-                << static_cast<unsigned int>(chest->position) << '\n'
-                << "chest_treasure=" << std::setw(2)
-                << static_cast<unsigned int>(chest->treasure_index)
-                << ':' << std::setw(2)
-                << static_cast<unsigned int>(chest->treasure_subid) << '\n'
-                << "chest_treasure_parameter=" << std::setw(2)
-                << static_cast<unsigned int>(treasure.parameter) << '\n'
-                << "chest_treasure_graphics=" << std::setw(2)
-                << static_cast<unsigned int>(treasure.graphics) << '\n';
-            if (
-                chest->treasure_index ==
-                oracle::content::rupee_treasure_index) {
-                std::cout
-                    << "chest_rupees=" << std::dec
-                    << chest_decoder.rupee_value(treasure.parameter)
-                    << '\n';
+            if (chest.has_value()) {
+                const auto treasure = chest_decoder.describe_treasure(*chest);
+                std::cout << "chest_position=" << std::hex << std::setw(2)
+                          << std::setfill('0')
+                          << static_cast<unsigned int>(chest->position) << '\n'
+                          << "chest_treasure=" << std::setw(2)
+                          << static_cast<unsigned int>(chest->treasure_index)
+                          << ':' << std::setw(2)
+                          << static_cast<unsigned int>(chest->treasure_subid)
+                          << '\n'
+                          << "chest_treasure_parameter=" << std::setw(2)
+                          << static_cast<unsigned int>(treasure.parameter)
+                          << '\n'
+                          << "chest_treasure_graphics=" << std::setw(2)
+                          << static_cast<unsigned int>(treasure.graphics)
+                          << '\n';
+                if (chest->treasure_index ==
+                    oracle::content::rupee_treasure_index) {
+                    std::cout << "chest_rupees=" << std::dec
+                              << chest_decoder.rupee_value(treasure.parameter)
+                              << '\n';
+                }
+                std::cout << std::dec;
             }
-            std::cout << std::dec;
-        }
-        if (spawn_position.has_value()) {
-            const auto room = std::find_if(
-                rooms.begin(),
-                rooms.end(),
-                [center_room](const RoomPlacement& placement) {
-                    return placement.layout.id.room == center_room;
-                });
-            const auto collision = std::find_if(
-                collisions.begin(),
-                collisions.end(),
-                [center_room](
-                    const oracle::content::RoomCollisionMap& map) {
-                    return map.id.room == center_room;
-                });
-            const auto column =
-                static_cast<std::size_t>(*spawn_position & 0x0f);
-            const auto packed_row =
-                static_cast<std::size_t>(*spawn_position >> 4u);
-            const auto row = packed_row == 0 ? 0 : packed_row - 1;
-            if (
-                room != rooms.end() &&
-                collision != collisions.end() &&
-                column < room->layout.columns &&
-                row < room->layout.rows) {
-                const auto metatile =
-                    room->layout.metatiles[
-                        row * room->layout.columns + column];
-                const auto tileset = pixel_decoder.describe_tileset(
-                    world_group,
-                    center_room,
-                    season);
-                const auto warp_property =
-                    topology_decoder.warp_tile_property(
-                        tileset.collision_mode,
-                        metatile);
-                std::cout
-                    << "spawn_metatile=" << std::hex << std::setw(2)
-                    << std::setfill('0')
-                    << static_cast<unsigned int>(metatile) << '\n'
-                    << "spawn_collision=" << std::setw(2)
-                    << static_cast<unsigned int>(
-                           collision->at(column, row))
-                    << '\n'
-                    << "spawn_warp_property=";
-                if (warp_property.has_value()) {
+            if (spawn_position.has_value()) {
+                const auto room = std::find_if(
+                    rooms.begin(), rooms.end(),
+                    [center_room](const RoomPlacement &placement) {
+                        return placement.layout.id.room == center_room;
+                    });
+                const auto collision = std::find_if(
+                    collisions.begin(), collisions.end(),
+                    [center_room](
+                        const oracle::content::RoomCollisionMap &map) {
+                        return map.id.room == center_room;
+                    });
+                const auto column =
+                    static_cast<std::size_t>(*spawn_position & 0x0f);
+                const auto packed_row =
+                    static_cast<std::size_t>(*spawn_position >> 4u);
+                const auto row = packed_row == 0 ? 0 : packed_row - 1;
+                if (room != rooms.end() && collision != collisions.end() &&
+                    column < room->layout.columns && row < room->layout.rows) {
+                    const auto metatile =
+                        room->layout
+                            .metatiles[row * room->layout.columns + column];
+                    const auto tileset = pixel_decoder.describe_tileset(
+                        world_group, center_room, season);
+                    const auto warp_property =
+                        topology_decoder.warp_tile_property(
+                            tileset.collision_mode, metatile);
                     std::cout
-                        << std::setw(2)
-                        << static_cast<unsigned int>(*warp_property);
-                } else {
-                    std::cout << "none";
-                }
-                std::cout << std::dec << '\n';
-                std::cout << "room_warp_tiles=";
-                bool first = true;
-                for (std::size_t tile_row = 0;
-                     tile_row < room->layout.rows;
-                     ++tile_row) {
-                    for (std::size_t tile_column = 0;
-                         tile_column < room->layout.columns;
-                         ++tile_column) {
-                        const auto candidate =
-                            room->layout.metatiles[
-                                tile_row * room->layout.columns +
-                                tile_column];
-                        if (
-                            !topology_decoder.warp_tile_property(
-                                 tileset.collision_mode,
-                                 candidate)
-                                 .has_value()) {
-                            continue;
-                        }
-                        if (!first) {
-                            std::cout << ',';
-                        }
-                        first = false;
-                        std::cout
-                            << std::hex << std::setw(2)
-                            << std::setfill('0')
-                            << static_cast<unsigned int>(
-                                   ((tile_row + 1) << 4u) |
-                                   tile_column);
-                    }
-                }
-                if (first) {
-                    std::cout << "none";
-                }
-                std::cout << std::dec << '\n';
-                const auto resolved =
-                    topology_decoder.resolve_tile_warp(
-                        world_group,
-                        center_room,
-                        *spawn_position,
-                        metatile,
-                        tileset.collision_mode,
-                        destination_variant);
-                std::cout << "spawn_resolved_warp=";
-                if (resolved.has_value()) {
-                    std::cout
-                        << std::hex << std::setw(2)
+                        << "spawn_metatile=" << std::hex << std::setw(2)
                         << std::setfill('0')
-                        << static_cast<unsigned int>(
-                               resolved->destination.area)
-                        << ':' << std::setw(2)
-                        << static_cast<unsigned int>(
-                               resolved->destination.room);
-                } else {
-                    std::cout << "none";
+                        << static_cast<unsigned int>(metatile) << '\n'
+                        << "spawn_collision=" << std::setw(2)
+                        << static_cast<unsigned int>(collision->at(column, row))
+                        << '\n'
+                        << "spawn_warp_property=";
+                    if (warp_property.has_value()) {
+                        std::cout << std::setw(2)
+                                  << static_cast<unsigned int>(*warp_property);
+                    } else {
+                        std::cout << "none";
+                    }
+                    std::cout << std::dec << '\n';
+                    std::cout << "room_warp_tiles=";
+                    bool first = true;
+                    for (std::size_t tile_row = 0; tile_row < room->layout.rows;
+                         ++tile_row) {
+                        for (std::size_t tile_column = 0;
+                             tile_column < room->layout.columns;
+                             ++tile_column) {
+                            const auto candidate =
+                                room->layout
+                                    .metatiles[tile_row * room->layout.columns +
+                                               tile_column];
+                            if (!topology_decoder
+                                     .warp_tile_property(tileset.collision_mode,
+                                                         candidate)
+                                     .has_value()) {
+                                continue;
+                            }
+                            if (!first) {
+                                std::cout << ',';
+                            }
+                            first = false;
+                            std::cout
+                                << std::hex << std::setw(2) << std::setfill('0')
+                                << static_cast<unsigned int>(
+                                       ((tile_row + 1) << 4u) | tile_column);
+                        }
+                    }
+                    if (first) {
+                        std::cout << "none";
+                    }
+                    std::cout << std::dec << '\n';
+                    const auto resolved = topology_decoder.resolve_tile_warp(
+                        world_group, center_room, *spawn_position, metatile,
+                        tileset.collision_mode, destination_variant);
+                    std::cout << "spawn_resolved_warp=";
+                    if (resolved.has_value()) {
+                        std::cout << std::hex << std::setw(2)
+                                  << std::setfill('0')
+                                  << static_cast<unsigned int>(
+                                         resolved->destination.area)
+                                  << ':' << std::setw(2)
+                                  << static_cast<unsigned int>(
+                                         resolved->destination.room);
+                    } else {
+                        std::cout << "none";
+                    }
+                    std::cout << std::dec << '\n';
                 }
-                std::cout << std::dec << '\n';
             }
-        }
-        if (region_output_path.has_value()) {
-            if (!authentic_region.has_value()) {
-                throw std::runtime_error{
-                    "region export has no authentic rendered pixels"};
+            if (region_output_path.has_value()) {
+                if (!authentic_region.has_value()) {
+                    throw std::runtime_error{
+                        "region export has no authentic rendered pixels"};
+                }
+                save_region_bmp(*authentic_region, *region_output_path);
+                return EXIT_SUCCESS;
             }
-            save_region_bmp(*authentic_region, *region_output_path);
-            return EXIT_SUCCESS;
+            if (describe_only) {
+                return EXIT_SUCCESS;
+            }
+            const auto window_result = run_window(
+                rom, std::move(rooms), std::move(collisions),
+                std::move(authentic_region), layout_decoder, pixel_decoder,
+                mutation_decoder, collision_decoder, object_decoder,
+                topology_decoder, season, center_room, atlas_mode,
+                large_room_mode, player_mode, force_diagnostic,
+                force_collision_overlay, force_object_overlay,
+                chest_scenario_mode, selected_scenario_name, scenario_facing,
+                room_flags, animation_tick, screenshot_path, benchmark_frames,
+                spawn_position);
+            if (!window_result.requested_scenario.has_value()) {
+                return EXIT_SUCCESS;
+            }
+            selected_scenario = *window_result.requested_scenario;
+            std::cout << "switching_scenario="
+                      << oracle::room_slice::describe_scenario(
+                             *selected_scenario)
+                             .name
+                      << '\n';
         }
-        if (describe_only) {
-            return EXIT_SUCCESS;
-        }
-        return run_window(
-            rom,
-            std::move(rooms),
-            std::move(collisions),
-            std::move(authentic_region),
-            layout_decoder,
-            pixel_decoder,
-            mutation_decoder,
-            collision_decoder,
-            object_decoder,
-            topology_decoder,
-            season,
-            center_room,
-            atlas_mode,
-            large_room_mode,
-            player_mode,
-            force_diagnostic,
-            force_collision_overlay,
-            force_object_overlay,
-            chest_scenario_mode,
-            selected_scenario_name,
-            scenario_facing,
-            room_flags,
-            animation_tick,
-            screenshot_path,
-            benchmark_frames,
-            spawn_position);
     } catch (const std::exception& error) {
         std::cerr << "oracle_room_slice: " << error.what() << '\n';
         return EXIT_FAILURE;

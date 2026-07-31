@@ -36,6 +36,17 @@ class SliceCatalogTests(unittest.TestCase):
             with self.subTest(scenario=scenario):
                 self.assertIn(f'"{scenario}"', source)
 
+    def test_room_slice_exposes_runtime_scenario_switching(self) -> None:
+        main = (ROOT / "apps" / "room_slice" / "main.cpp").read_text(
+            encoding="utf-8"
+        )
+        catalog = (ROOT / "apps" / "room_slice" / "scenario_catalog.cpp").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("SDLK_F5", main)
+        self.assertIn("SDL_KMOD_SHIFT", main)
+        self.assertIn("cycle_scenario", catalog)
+
 
 if __name__ == "__main__":
     unittest.main()

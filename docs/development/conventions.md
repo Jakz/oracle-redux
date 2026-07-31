@@ -67,11 +67,12 @@ role or an upcoming slice establishes a durable subsystem. Avoid generic
 
 - CMake lists engine implementations explicitly so ownership changes are
   reviewable.
-- MSVC projects use recursive `src`, `include`, and native-test globs so a new
-  file builds immediately.
-- Each MSVC `.vcxproj.filters` file mirrors physical implementation folders and
-  logical public-header responsibilities. Update filters when adding a new
-  durable folder.
+- `OracleRoomSlice.vcxproj` lists application, engine, and public-header files
+  explicitly so Visual Studio reliably shows them. Its `src` filter tree keeps
+  headers beside their functional implementations. Add every new file to both
+  the project and filter sidecar.
+- `OracleRuntimeTests.vcxproj` retains recursive engine, header, and native-test
+  globs so headless coverage picks up new files immediately.
 - The solution keeps application, test, dependency, and project-guidance
   groups distinct.
 

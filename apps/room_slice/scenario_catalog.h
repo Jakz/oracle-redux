@@ -29,6 +29,9 @@ struct ScenarioDescriptor {
     ScenarioId id) noexcept;
 [[nodiscard]] std::optional<ScenarioId> scenario_from_name(
     std::string_view name) noexcept;
+[[nodiscard]] ScenarioId cycle_scenario(
+    ScenarioId current,
+    int direction = 1) noexcept;
 
 void print_scenario_catalog(std::ostream& output);
 [[nodiscard]] ScenarioId select_scenario(
