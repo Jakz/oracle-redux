@@ -37,6 +37,7 @@
 #include "oracle/core/campaign.h"
 #include "oracle/core/actor_slot_domain.h"
 #include "oracle/gameplay/chest_runtime.h"
+#include "oracle/gameplay/feather_runtime.h"
 #include "oracle/gameplay/player_traversal.h"
 #include "oracle/gameplay/octorok_runtime.h"
 #include "oracle/gameplay/room_actor_loader.h"
@@ -49,6 +50,8 @@
 namespace {
 
 using oracle::content::RoomPlacement;
+
+constexpr std::uint8_t tileset_flag_sidescroll = 0x20;
 
 struct CameraState {
     double x{};
@@ -460,6 +463,7 @@ void render_player(
     const oracle::content::LinkSpriteFrame& frame,
     const double world_x,
     const double world_y,
+    const double visual_elevation,
     const CameraState camera,
     const int output_width,
     const int output_height) {
@@ -489,7 +493,8 @@ void render_player(
             static_cast<float>(frame.origin_x * camera.zoom),
         .y =
             screen_y +
-            static_cast<float>(frame.origin_y * camera.zoom),
+            static_cast<float>(
+                (frame.origin_y - visual_elevation) * camera.zoom),
         .w = static_cast<float>(frame.width * camera.zoom),
         .h = static_cast<float>(frame.height * camera.zoom),
     };
@@ -2245,11 +2250,19 @@ int run_window(
     };
     seed_chest_room_flags();
     oracle::gameplay::SwordRuntime sword_runtime;
+    oracle::gameplay::FeatherRuntime feather_runtime{
+        rom.metadata().campaign};
     oracle::gameplay::PlayerCombatState player_combat;
     oracle::gameplay::OctorokStepReport last_combat_step;
     oracle::gameplay::ChestStepReport last_chest_step;
     oracle::gameplay::SwordStepReport last_sword_step;
+    oracle::gameplay::FeatherStepReport last_feather_step;
     oracle::input::SemanticInputSampler semantic_input;
+    std::uint8_t current_tileset_flags =
+        pixel_decoder.describe_tileset(
+            static_cast<std::uint8_t>(current_player.room.area),
+            static_cast<std::uint8_t>(current_player.room.room),
+            season).flags;
     const auto reload_current_objects = [&]() {
         current_objects = object_decoder.decode(
             static_cast<std::uint8_t>(current_player.room.area),
@@ -2260,6 +2273,10 @@ int run_window(
             oracle::gameplay::RoomActorLoader::load(
                 current_objects,
                 current_actors);
+        current_tileset_flags = pixel_decoder.describe_tileset(
+            static_cast<std::uint8_t>(current_player.room.area),
+            static_cast<std::uint8_t>(current_player.room.room),
+            season).flags;
     };
 
     const auto rebuild_region_texture = [&]() {
@@ -2515,6 +2532,7 @@ int run_window(
                 chest_runtime.reset();
                 seed_chest_room_flags();
                 sword_runtime.reset();
+                feather_runtime.reset();
                 player_combat =
                     oracle::gameplay::PlayerCombatState{};
                 last_combat_step =
@@ -2523,6 +2541,8 @@ int run_window(
                     oracle::gameplay::ChestStepReport{};
                 last_sword_step =
                     oracle::gameplay::SwordStepReport{};
+                last_feather_step =
+                    oracle::gameplay::FeatherStepReport{};
             } else if (
                 event.type == SDL_EVENT_KEY_DOWN &&
                 event.key.key == SDLK_F1 &&
@@ -2588,6 +2608,16 @@ int run_window(
                 if (chest_step.opened) {
                     refresh_opened_chest(current_player.room);
                 }
+                const bool side_scrolling =
+                    (current_tileset_flags &
+                     tileset_flag_sidescroll) != 0;
+                last_feather_step = feather_runtime.update(
+                    chest_step.opened
+                        ? oracle::input::InputFrame{}
+                        : gameplay_input,
+                    current_player,
+                    current_actors,
+                    side_scrolling);
                 last_sword_step = sword_runtime.update(
                     gameplay_input,
                     current_player,
@@ -2934,6 +2964,8 @@ int run_window(
             const auto desired_link_frame =
                 last_sword_step.pose.has_value()
                 ? last_sword_step.pose->link_frame
+                : last_feather_step.link_frame.has_value()
+                ? *last_feather_step.link_frame
                 : oracle::content::LinkSpriteDecoder::
                       select_original_frame(
                       link_direction(current_player.facing),
@@ -2978,6 +3010,11 @@ int run_window(
                     oracle::gameplay::PlayerTraversal::world_y(
                         previous_player),
                     oracle::gameplay::PlayerTraversal::world_y(
+                        current_player)),
+                timing.interpolate(
+                    oracle::gameplay::FeatherRuntime::visual_elevation(
+                        previous_player),
+                    oracle::gameplay::FeatherRuntime::visual_elevation(
                         current_player)),
                 render_camera,
                 output_width,
@@ -3087,6 +3124,13 @@ int run_window(
             diagnostic_line << " | face chest from below";
         } else if (last_chest_step.unsupported_treasure) {
             diagnostic_line << " | treasure family not ported";
+        }
+        if (last_feather_step.in_air) {
+            diagnostic_line
+                << " | feather " << std::setprecision(1)
+                << last_feather_step.visual_elevation << "px";
+        } else if (last_feather_step.rejected) {
+            diagnostic_line << " | feather unavailable here";
         }
         if (
             last_combat_step.enemies_hit != 0 ||

@@ -160,8 +160,10 @@ build/oracle_room_slice "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc"
 Controls:
 
 - in normal launch mode, `WASD` or arrow keys move Link;
-- `Z` or Enter opens chests, interacts, and advances dialogue; directions choose a dialogue
-  option; `X` attacks outside dialogue and cancels inside dialogue;
+- `Z` uses the level-one Roc's Feather when no contextual interaction consumes
+  A; `Z` or Enter also opens chests, interacts, and advances dialogue;
+  directions choose a dialogue option; `X` attacks outside dialogue and
+  cancels inside dialogue;
 - in `--atlas` mode, `WASD` or arrow keys pan the camera;
 - the mouse wheel zooms between overview and close-up scales;
 - `R` resets the camera;
@@ -184,6 +186,12 @@ The runtime replaces only that room's pixels and collision cache, sets the
 original `ROOMFLAG_ITEM`, and prevents repeat collection. The binary formats
 and current fidelity boundary are documented in
 [`docs/reverse-engineering/chest-and-treasure-data.md`](docs/reverse-engineering/chest-and-treasure-data.md).
+
+After opening the default chest, press `Z` again to exercise the shared
+top-down Roc's Feather path. Link uses the ROM's directional jump poses and
+signed 8.8 retail Z arc while his shadow remains on the ground. The source
+mapping and deferred terrain reactions are documented in
+[`docs/reverse-engineering/rocs-feather-slice.md`](docs/reverse-engineering/rocs-feather-slice.md).
 
 Launch the first deterministic actor-interaction scenario. The runtime chooses
 the correct Vasu shop for either campaign:

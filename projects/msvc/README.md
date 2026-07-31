@@ -26,7 +26,9 @@ configuration output directory as the executable.
   starts immediately below the chest; press `Z` or Enter to open it. The
   original chest record, treasure parameter, 30-rupee value, opened tile, and
   `ROOMFLAG_ITEM` persistence are active. This remains true when Visual
-  Studio has cached an old `.vcxproj.user` launch entry. It renders authentic
+  Studio has cached an old `.vcxproj.user` launch entry. Press `Z` again after
+  opening the chest to test the shared level-one Roc's Feather jump, including
+  ROM poses and fixed-point elevation. It renders authentic
   cartridge pixels plus Octorok, projectile, Link attack, and sword OAM, runs
   the shared native enemy/part/item state paths, applies enemy and projectile
   damage, and exposes `X` as the original arc-based sword swing. Defeated red

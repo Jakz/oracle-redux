@@ -29,6 +29,11 @@ struct PlayerState {
     double local_x{};
     double local_y{};
     PlayerFacing facing{PlayerFacing::south};
+    // Original SpecialObject.z/speedZ are signed 8.8 fixed-point values.
+    // Negative Z is above the ground plane.
+    std::int32_t z_subpixels{};
+    std::int32_t speed_z_subpixels{};
+    std::uint8_t in_air{};
 };
 
 struct MovementInput {

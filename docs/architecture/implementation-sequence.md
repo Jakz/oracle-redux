@@ -131,8 +131,15 @@ the original bottom-facing A rule, resolves packed-BCD rupee values, stores
 `ROOMFLAG_ITEM`, and reapplies the opened `$f0` tile after a room reload. See
 [`../reverse-engineering/chest-and-treasure-data.md`](../reverse-engineering/chest-and-treasure-data.md).
 
-Next, add one representative secondary item before broadening to
-random-position records or another enemy family.
+The first secondary-item checkpoint now implements the shared level-one Roc's
+Feather parent path in top-down rooms: original parent slot 1, signed 8.8 Z
+physics, campaign-relocated jump frames, ground-plane landing, and independent
+visual elevation. See
+[`../reverse-engineering/rocs-feather-slice.md`](../reverse-engineering/rocs-feather-slice.md).
+
+Next, close the Feather's tile-type landing reactions and Z-aware contact
+boundary before adding the minimal HUD. This prevents the HUD milestone from
+masking the older hole, water, and lava behavior gap.
 
 ## Following slices
 

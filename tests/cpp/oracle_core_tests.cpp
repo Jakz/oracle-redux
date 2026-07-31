@@ -32,6 +32,7 @@
 #include "oracle/experience_settings.h"
 #include "oracle/gameplay/actor_collision.h"
 #include "oracle/gameplay/chest_runtime.h"
+#include "oracle/gameplay/feather_runtime.h"
 #include "oracle/gameplay/interaction_target.h"
 #include "oracle/gameplay/octorok_runtime.h"
 #include "oracle/gameplay/player_traversal.h"
@@ -445,6 +446,21 @@ void test_link_sprite_facing(
                 idle.width == 16 &&
                 idle.height == 16,
             "ordinary Link frames retain the original 16x16 anchor");
+
+        const auto jump_base = campaign == oracle::core::Campaign::ages
+            ? std::uint8_t{0xe4}
+            : std::uint8_t{0xd8};
+        const auto jump = decoder.decode_original_frame(
+            static_cast<std::uint8_t>(jump_base + index));
+        check(
+            jump.original_frame == jump_base + index &&
+                std::any_of(
+                    jump.pixels.begin(),
+                    jump.pixels.end(),
+                    [](const oracle::content::RgbaPixel pixel) {
+                        return pixel.alpha != 0;
+                    }),
+            "Roc's Feather jump pose decodes from campaign ROM graphics");
     }
 
     const auto north_attack = decoder.decode_original_frame(0xb4);
@@ -454,6 +470,109 @@ void test_link_sprite_facing(
                 static_cast<std::size_t>(
                     north_attack.width * north_attack.height),
         "shifted attack OAM expands above Link without clipping");
+}
+
+void test_feather_runtime() {
+    using oracle::core::ActorCategory;
+    using oracle::core::ActorIdentity;
+    using oracle::core::ActorSlotDomain;
+    using oracle::core::Campaign;
+    using oracle::core::WorldRoomId;
+    using oracle::gameplay::FeatherRuntime;
+    using oracle::gameplay::PlayerFacing;
+    using oracle::gameplay::PlayerState;
+    using oracle::input::InputAction;
+
+    for (const auto campaign : {Campaign::ages, Campaign::seasons}) {
+        ActorSlotDomain actors;
+        PlayerState player{
+            .room = WorldRoomId{.area = 0, .room = 0x64},
+            .local_x = 80.0,
+            .local_y = 64.0,
+            .facing = PlayerFacing::east,
+        };
+        FeatherRuntime runtime{campaign};
+        auto report = runtime.update(
+            pressed_frame(InputAction::a),
+            player,
+            actors);
+        const auto jump_base = campaign == Campaign::ages
+            ? std::uint8_t{0xe4}
+            : std::uint8_t{0xd8};
+        check(
+            report.started &&
+                report.in_air &&
+                report.link_frame == jump_base + 1 &&
+                player.in_air == 2,
+            "level-one feather enters the shared top-down airborne state");
+        check(
+            player.z_subpixels == -0x01e0 &&
+                player.speed_z_subpixels == -0x01c0,
+            "feather applies retail signed 8.8 jump speed and gravity");
+        check_close(
+            report.visual_elevation,
+            1.875,
+            "first feather tick exposes exact visual elevation");
+        check(
+            actors.active_count(ActorCategory::item) == 0,
+            "level-one top-down feather clears parent item slot one");
+
+        for (int tick = 1; tick < 30; ++tick) {
+            report = runtime.update({}, player, actors);
+            check(
+                !report.landed && report.in_air,
+                "feather remains airborne before the retail landing tick");
+            if (tick == 9) {
+                check(
+                    report.link_frame == jump_base + 5,
+                    "jump animation advances after its first nine ticks");
+            }
+            if (tick == 18) {
+                check(
+                    report.link_frame == jump_base + 9,
+                    "jump animation holds its third directional pose");
+            }
+        }
+        report = runtime.update({}, player, actors);
+        check(
+            report.landed &&
+                !report.in_air &&
+                !report.link_frame.has_value() &&
+                player.z_subpixels == 0 &&
+                player.speed_z_subpixels == 0 &&
+                player.in_air == 0,
+            "feather lands on tick 31 and clears original airborne fields");
+    }
+
+    ActorSlotDomain side_actors;
+    PlayerState side_player{
+        .room = WorldRoomId{.area = 6, .room = 0x10},
+        .local_x = 80.0,
+        .local_y = 64.0,
+    };
+    FeatherRuntime side_runtime{Campaign::ages};
+    const auto side_rejected = side_runtime.update(
+        pressed_frame(InputAction::a),
+        side_player,
+        side_actors,
+        true);
+    check(
+        side_rejected.rejected && !side_rejected.in_air,
+        "top-down feather slice rejects deferred side-scrolling physics");
+
+    const auto occupied = side_actors.allocate_at(
+        ActorCategory::item,
+        1,
+        ActorIdentity{.id = 0x01},
+        side_player.room);
+    check(occupied.has_value(), "test reserves feather parent slot one");
+    const auto slot_rejected = side_runtime.update(
+        pressed_frame(InputAction::a),
+        side_player,
+        side_actors);
+    check(
+        slot_rejected.rejected && !slot_rejected.in_air,
+        "occupied original parent slot prevents feather activation");
 }
 
 void test_sword_rom_scenario(
@@ -2246,6 +2365,7 @@ int main() {
     test_room_collision_shapes();
     test_spatial_room_seams();
     test_player_traversal();
+    test_feather_runtime();
     test_link_sprite_facing(
         "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",
         oracle::core::Campaign::ages);

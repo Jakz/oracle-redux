@@ -70,6 +70,7 @@ target_link_libraries(oracle_script PUBLIC oracle_content oracle_input)
 add_library(oracle_gameplay
     src/gameplay/actor_collision.cpp
     src/gameplay/chest_runtime.cpp
+    src/gameplay/feather_runtime.cpp
     src/gameplay/interaction_target.cpp
     src/gameplay/octorok_runtime.cpp
     src/gameplay/player_traversal.cpp
