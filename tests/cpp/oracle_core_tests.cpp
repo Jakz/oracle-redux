@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "oracle/content/interaction_sprite.h"
+#include "oracle/content/chest_data.h"
 #include "oracle/content/link_sprite.h"
 #include "oracle/content/part_data.h"
 #include "oracle/content/part_sprite.h"
@@ -30,6 +31,7 @@
 #include "oracle/content/sword_sprite.h"
 #include "oracle/experience_settings.h"
 #include "oracle/gameplay/actor_collision.h"
+#include "oracle/gameplay/chest_runtime.h"
 #include "oracle/gameplay/interaction_target.h"
 #include "oracle/gameplay/octorok_runtime.h"
 #include "oracle/gameplay/player_traversal.h"
@@ -586,6 +588,137 @@ void test_sword_rom_scenario(
             restarted.pose.has_value() &&
             restarted.pose->actor.generation != first_generation,
         "a later sword press allocates a fresh item-slot generation");
+}
+
+void test_chest_rom_scenario(
+    const std::filesystem::path& path,
+    const oracle::core::Campaign campaign) {
+    if (!std::filesystem::exists(path)) {
+        return;
+    }
+    using oracle::content::ChestDataDecoder;
+    using oracle::content::RoomLayoutDecoder;
+    using oracle::content::RoomPixelDecoder;
+    using oracle::content::RomSource;
+    using oracle::gameplay::ChestRuntime;
+    using oracle::gameplay::PlayerFacing;
+    using oracle::gameplay::PlayerTraversal;
+    using oracle::input::InputAction;
+
+    const auto rom = RomSource::load(path);
+    const auto scenario = oracle::gameplay::chest_scenario(campaign);
+    const ChestDataDecoder decoder{rom};
+    const auto chest = decoder.find(scenario.room);
+    check(chest.has_value(), "chest scenario resolves a retail chest record");
+    if (!chest.has_value()) {
+        return;
+    }
+    check(
+        chest->position ==
+            (campaign == oracle::core::Campaign::ages ? 0x27 : 0x5d) &&
+            chest->treasure_index == 0x28 &&
+            chest->treasure_subid == 0x04,
+        "both chest scenarios select ROM rupee subid 04");
+    const auto treasure = decoder.describe_treasure(*chest);
+    check(
+        treasure.behavior == 0x38 &&
+            treasure.parameter == 0x07 &&
+            treasure.text_id == 0x05 &&
+            treasure.graphics == 0x2b &&
+            decoder.rupee_value(treasure.parameter) == 30,
+        "rupee chest descriptor and packed-BCD value decode from ROM");
+
+    const RoomPixelDecoder pixels{rom};
+    const auto tileset = pixels.describe_tileset(
+        static_cast<std::uint8_t>(scenario.room.area),
+        static_cast<std::uint8_t>(scenario.room.room));
+    auto fresh_room = RoomLayoutDecoder{rom}.decode_large_room(
+        static_cast<std::uint8_t>(scenario.room.area),
+        tileset.layout_group,
+        static_cast<std::uint8_t>(scenario.room.room));
+    const auto layout_index = ChestDataDecoder::room_layout_index(
+        chest->position,
+        fresh_room);
+    check(
+        layout_index.has_value() &&
+            fresh_room.metatiles[*layout_index] ==
+                oracle::content::chest_closed_metatile,
+        "packed chest position selects the visible retail closed tile");
+    const oracle::content::RoomMutationDecoder mutations{rom};
+    const auto preview_room = mutations.apply_standard_substitutions(
+        fresh_room,
+        tileset,
+        oracle::content::room_flag_item);
+    check(
+        layout_index.has_value() &&
+            preview_room.metatiles[*layout_index] ==
+                oracle::content::chest_opened_metatile,
+        "ROOMFLAG_ITEM preview applies retail opened-chest substitution");
+
+    auto player = PlayerTraversal::from_packed_room_position(
+        scenario.room,
+        scenario.player_spawn_yx);
+    player.local_x =
+        static_cast<double>((chest->position & 0x0f) * 16) - 8.0;
+    player.local_y =
+        static_cast<double>(chest->position >> 4u) * 16.0 + 8.0;
+    player.facing = PlayerFacing::east;
+    ChestRuntime wrong_side{rom};
+    std::uint16_t wrong_side_rupees = 0;
+    const auto rejected = wrong_side.update(
+        pressed_frame(InputAction::a),
+        player,
+        wrong_side_rupees);
+    check(
+        rejected.wrong_side &&
+            !rejected.opened &&
+            wrong_side_rupees == 0,
+        "chest rejects A unless Link faces its bottom edge");
+
+    player = PlayerTraversal::from_packed_room_position(
+        scenario.room,
+        scenario.player_spawn_yx);
+    player.facing = PlayerFacing::north;
+    ChestRuntime loaded_state{rom};
+    loaded_state.set_room_flags(
+        scenario.room,
+        oracle::content::room_flag_item);
+    std::uint16_t loaded_rupees = 0;
+    const auto already_open = loaded_state.update(
+        pressed_frame(InputAction::a),
+        player,
+        loaded_rupees);
+    check(
+        !already_open.opened && loaded_rupees == 0,
+        "loaded ROOMFLAG_ITEM prevents chest reward duplication");
+
+    ChestRuntime runtime{rom};
+    std::uint16_t rupees = 0;
+    const auto opened = runtime.update(
+        pressed_frame(InputAction::a),
+        player,
+        rupees);
+    check(
+        opened.opened &&
+            opened.rupees_awarded == 30 &&
+            opened.room_flags == oracle::content::room_flag_item &&
+            rupees == 30,
+        "chest opens once, awards 30 rupees, and sets ROOMFLAG_ITEM");
+    const auto repeated = runtime.update(
+        pressed_frame(InputAction::a),
+        player,
+        rupees);
+    check(
+        !repeated.opened &&
+            repeated.rupees_awarded == 0 &&
+            rupees == 30,
+        "opened chest cannot award its treasure twice");
+    check(
+        runtime.apply_room_state(fresh_room) &&
+            layout_index.has_value() &&
+            fresh_room.metatiles[*layout_index] ==
+                oracle::content::chest_opened_metatile,
+        "fresh room decode reapplies persistent opened-chest metatile");
 }
 
 void test_vasu_rom_scenarios() {
@@ -2036,6 +2169,12 @@ int main() {
         "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",
         oracle::core::Campaign::ages);
     test_sword_rom_scenario(
+        "roms/Legend of Zelda, The - Oracle of Seasons (USA).gbc",
+        oracle::core::Campaign::seasons);
+    test_chest_rom_scenario(
+        "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",
+        oracle::core::Campaign::ages);
+    test_chest_rom_scenario(
         "roms/Legend of Zelda, The - Oracle of Seasons (USA).gbc",
         oracle::core::Campaign::seasons);
     test_vasu_rom_scenarios();

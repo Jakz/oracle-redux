@@ -1,5 +1,7 @@
 #include "oracle/content/room_mutations.h"
 
+#include "oracle/content/chest_data.h"
+
 #include <array>
 #include <stdexcept>
 #include <vector>
@@ -67,6 +69,17 @@ RoomLayout RoomMutationDecoder::apply_standard_substitutions(
             });
         }
         apply_replacements(room.metatiles, replacements);
+    }
+    if ((room_flags & room_flag_item) != 0) {
+        const ChestDataDecoder chest_decoder{rom_};
+        const auto chest = chest_decoder.find(room.id);
+        if (chest.has_value()) {
+            static_cast<void>(
+                ChestDataDecoder::apply_opened_chest(
+                    room,
+                    *chest,
+                    room_flags));
+        }
     }
     return room;
 }

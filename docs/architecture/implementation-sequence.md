@@ -125,8 +125,14 @@ Octorok's `$8e` probability/drop-set entry, bouncing heart/rupee parts, and
 collection. See
 [`../reverse-engineering/octorok-defeat-slice.md`](../reverse-engineering/octorok-defeat-slice.md).
 
-Next, add one secondary item and a persistent pickup or chest before
-broadening to random-position records or another enemy family.
+The persistent-chest checkpoint now decodes the relocated `chestData` and
+`treasureObjectData` tables, preserves packed `wRoomLayout` positions, applies
+the original bottom-facing A rule, resolves packed-BCD rupee values, stores
+`ROOMFLAG_ITEM`, and reapplies the opened `$f0` tile after a room reload. See
+[`../reverse-engineering/chest-and-treasure-data.md`](../reverse-engineering/chest-and-treasure-data.md).
+
+Next, add one representative secondary item before broadening to
+random-position records or another enemy family.
 
 ## Following slices
 

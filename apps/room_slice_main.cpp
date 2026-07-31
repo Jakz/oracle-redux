@@ -20,6 +20,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "oracle/content/chest_data.h"
 #include "oracle/content/link_sprite.h"
 #include "oracle/content/part_sprite.h"
 #include "oracle/content/interaction_sprite.h"
@@ -35,6 +36,7 @@
 #include "oracle/content/sword_sprite.h"
 #include "oracle/core/campaign.h"
 #include "oracle/core/actor_slot_domain.h"
+#include "oracle/gameplay/chest_runtime.h"
 #include "oracle/gameplay/player_traversal.h"
 #include "oracle/gameplay/octorok_runtime.h"
 #include "oracle/gameplay/room_actor_loader.h"
@@ -1802,6 +1804,7 @@ int run_window(
     const bool force_diagnostic,
     const bool force_collision_overlay,
     const bool force_object_overlay,
+    const bool chest_scenario_mode,
     const std::uint8_t room_flags,
     const std::uint64_t starting_animation_tick,
     std::optional<std::filesystem::path> screenshot_path,
@@ -2149,13 +2152,18 @@ int run_window(
         oracle::gameplay::vasu_scenario(rom.metadata().campaign);
     const auto selected_octorok_scenario =
         oracle::gameplay::octorok_scenario(rom.metadata().campaign);
+    const auto selected_chest_scenario =
+        oracle::gameplay::chest_scenario(rom.metadata().campaign);
     if (
         (
             spawn_position == selected_vasu_scenario.player_spawn_yx &&
             initial_player.room == selected_vasu_scenario.room) ||
         (
             spawn_position == selected_octorok_scenario.player_spawn_yx &&
-            initial_player.room == selected_octorok_scenario.room)) {
+            initial_player.room == selected_octorok_scenario.room) ||
+        (
+            spawn_position == selected_chest_scenario.player_spawn_yx &&
+            initial_player.room == selected_chest_scenario.room)) {
         initial_player.facing =
             oracle::gameplay::PlayerFacing::north;
     }
@@ -2225,9 +2233,21 @@ int run_window(
             current_actors);
     oracle::gameplay::VasuInteractionRuntime vasu_runtime{rom};
     oracle::gameplay::OctorokRuntime octorok_runtime{rom};
+    oracle::gameplay::ChestRuntime chest_runtime{rom};
+    const auto seed_chest_room_flags = [&]() {
+        for (const auto& placement : rooms) {
+            chest_runtime.set_room_flags(
+                placement.layout.id,
+                static_cast<std::uint8_t>(
+                    chest_runtime.room_flags(placement.layout.id) |
+                    room_flags));
+        }
+    };
+    seed_chest_room_flags();
     oracle::gameplay::SwordRuntime sword_runtime;
     oracle::gameplay::PlayerCombatState player_combat;
     oracle::gameplay::OctorokStepReport last_combat_step;
+    oracle::gameplay::ChestStepReport last_chest_step;
     oracle::gameplay::SwordStepReport last_sword_step;
     oracle::input::SemanticInputSampler semantic_input;
     const auto reload_current_objects = [&]() {
@@ -2269,6 +2289,74 @@ int run_window(
         }
         SDL_SetTextureScaleMode(region_texture, SDL_SCALEMODE_NEAREST);
     };
+    const auto refresh_opened_chest =
+        [&](const oracle::core::WorldRoomId room_id) {
+            const auto room = std::find_if(
+                rooms.begin(),
+                rooms.end(),
+                [room_id](const RoomPlacement& placement) {
+                    return placement.layout.id == room_id;
+                });
+            if (
+                room == rooms.end() ||
+                !chest_runtime.apply_room_state(room->layout)) {
+                return;
+            }
+            const auto tileset = pixel_decoder.describe_tileset(
+                static_cast<std::uint8_t>(room_id.area),
+                static_cast<std::uint8_t>(room_id.room),
+                season);
+            const auto collision = std::find_if(
+                collisions.begin(),
+                collisions.end(),
+                [room_id](const oracle::content::RoomCollisionMap& map) {
+                    return map.id == room_id;
+                });
+            if (collision != collisions.end()) {
+                *collision = collision_decoder.decode(room->layout, tileset);
+            }
+            if (!authentic_region.has_value() || region_texture == nullptr) {
+                return;
+            }
+            const auto index = static_cast<std::size_t>(
+                std::distance(rooms.begin(), room));
+            auto rendered = pixel_decoder.render(
+                room->layout,
+                season,
+                logic_tick);
+            copy_room_pixels(*authentic_region, *room, rendered);
+            const SDL_Rect rectangle{
+                .x = room->world_x - authentic_region->world_x,
+                .y = room->world_y - authentic_region->world_y,
+                .w = rendered.width,
+                .h = rendered.height,
+            };
+            if (!SDL_UpdateTexture(
+                    region_texture,
+                    &rectangle,
+                    rendered.pixels.data(),
+                    rendered.width *
+                        static_cast<int>(
+                            sizeof(oracle::content::RgbaPixel)))) {
+                throw std::runtime_error{
+                    std::string{"opened chest texture upload failed: "} +
+                    SDL_GetError()};
+            }
+            if (index < authentic_region->rooms.size()) {
+                authentic_region->rooms[index] = std::move(rendered);
+            }
+        };
+    std::optional<std::vector<RoomPlacement>> chest_reset_rooms;
+    std::optional<std::vector<oracle::content::RoomCollisionMap>>
+        chest_reset_collisions;
+    std::optional<RegionPixels> chest_reset_region;
+    std::optional<oracle::gameplay::PlayerState> chest_reset_player;
+    if (chest_scenario_mode) {
+        chest_reset_rooms = rooms;
+        chest_reset_collisions = collisions;
+        chest_reset_region = authentic_region;
+        chest_reset_player = initial_player;
+    }
     const auto execute_warp =
         [&](const oracle::content::RoomExit& warp) {
             const auto preserve_diagnostic_view = diagnostic;
@@ -2287,7 +2375,9 @@ int run_window(
             collisions = std::move(loaded.collisions);
             authentic_region = std::move(loaded.authentic_region);
             large_room_mode = loaded.large_room_mode;
+            seed_chest_room_flags();
             rebuild_region_texture();
+            refresh_opened_chest(warp.destination);
 
             const auto destination_placement = std::find_if(
                 rooms.begin(),
@@ -2388,6 +2478,17 @@ int run_window(
                 event.type == SDL_EVENT_KEY_DOWN &&
                 event.key.key == SDLK_R) {
                 if (
+                    chest_scenario_mode &&
+                    chest_reset_rooms.has_value() &&
+                    chest_reset_collisions.has_value() &&
+                    chest_reset_player.has_value()) {
+                    rooms = *chest_reset_rooms;
+                    collisions = *chest_reset_collisions;
+                    authentic_region = chest_reset_region;
+                    initial_player = *chest_reset_player;
+                    rebuild_region_texture();
+                }
+                if (
                     player_mode &&
                     current_player.room.area !=
                         initial_player.room.area) {
@@ -2411,11 +2512,15 @@ int run_window(
                 current_player = initial_player;
                 reload_current_objects();
                 octorok_runtime.reset();
+                chest_runtime.reset();
+                seed_chest_room_flags();
                 sword_runtime.reset();
                 player_combat =
                     oracle::gameplay::PlayerCombatState{};
                 last_combat_step =
                     oracle::gameplay::OctorokStepReport{};
+                last_chest_step =
+                    oracle::gameplay::ChestStepReport{};
                 last_sword_step =
                     oracle::gameplay::SwordStepReport{};
             } else if (
@@ -2470,6 +2575,19 @@ int run_window(
                     vasu_runtime.captures_input()
                     ? oracle::input::InputFrame{}
                     : input_frame;
+                const auto chest_step = chest_runtime.update(
+                    gameplay_input,
+                    current_player,
+                    player_combat.rupees);
+                if (
+                    chest_step.opened ||
+                    chest_step.wrong_side ||
+                    chest_step.unsupported_treasure) {
+                    last_chest_step = chest_step;
+                }
+                if (chest_step.opened) {
+                    refresh_opened_chest(current_player.room);
+                }
                 last_sword_step = sword_runtime.update(
                     gameplay_input,
                     current_player,
@@ -2933,7 +3051,7 @@ int run_window(
         SDL_RenderFillRect(renderer, &panel);
         SDL_SetRenderDrawColor(renderer, 232, 238, 248, SDL_ALPHA_OPAQUE);
         const std::string line_one = player_mode
-            ? "ROM runtime | WASD/arrows: move | Z/Enter: talk | X: sword/back"
+            ? "ROM runtime | WASD/arrows: move | Z/Enter: open/talk | X: sword/back"
             : "Authentic ROM pixels | WASD/arrows: pan | wheel: zoom";
         const std::string line_two =
             diagnostic
@@ -2961,6 +3079,15 @@ int run_window(
             << player_combat.rupees
             << " | FPS " << std::fixed << std::setprecision(1)
             << measured_fps;
+        if (
+            (chest_runtime.room_flags(current_player.room) &
+             oracle::content::room_flag_item) != 0) {
+            diagnostic_line << " | chest opened";
+        } else if (last_chest_step.wrong_side) {
+            diagnostic_line << " | face chest from below";
+        } else if (last_chest_step.unsupported_treasure) {
+            diagnostic_line << " | treasure family not ported";
+        }
         if (
             last_combat_step.enemies_hit != 0 ||
             last_combat_step.enemies_defeated != 0 ||
@@ -3135,6 +3262,7 @@ int main(int argc, char* argv[]) {
                    "[--list-exits] [--follow-exit N] "
                    "[--catalog-topology] [--catalog-objects] "
                    "[--explore] [--vasu-scenario] "
+                   "[--chest-scenario] "
                    "[--octorok-scenario] "
                    "[--spawn-yx HEX] "
                    "[--tick N] [--room-flags HEX] "
@@ -3154,6 +3282,7 @@ int main(int argc, char* argv[]) {
         bool catalog_topology = false;
         bool catalog_objects = false;
         bool vasu_scenario_mode = false;
+        bool chest_scenario_mode = false;
         bool octorok_scenario_mode = false;
         bool manual_world_selection = false;
         std::optional<std::size_t> follow_exit_index;
@@ -3193,6 +3322,8 @@ int main(int argc, char* argv[]) {
                 manual_world_selection = true;
             } else if (argument == "--vasu-scenario") {
                 vasu_scenario_mode = true;
+            } else if (argument == "--chest-scenario") {
+                chest_scenario_mode = true;
             } else if (argument == "--octorok-scenario") {
                 octorok_scenario_mode = true;
             } else if (
@@ -3255,11 +3386,20 @@ int main(int argc, char* argv[]) {
                     "unknown or incomplete command-line argument"};
             }
         }
+        const auto scenario_count =
+            static_cast<unsigned int>(vasu_scenario_mode) +
+            static_cast<unsigned int>(chest_scenario_mode) +
+            static_cast<unsigned int>(octorok_scenario_mode);
+        if (scenario_count > 1) {
+            throw std::invalid_argument{
+                "select at most one playable scenario"};
+        }
         if (
             !manual_world_selection &&
             !vasu_scenario_mode &&
+            !chest_scenario_mode &&
             !octorok_scenario_mode) {
-            octorok_scenario_mode = true;
+            chest_scenario_mode = true;
         }
         if (world_group >= 8) {
             throw std::invalid_argument{
@@ -3274,6 +3414,17 @@ int main(int argc, char* argv[]) {
         if (vasu_scenario_mode) {
             const auto scenario =
                 oracle::gameplay::vasu_scenario(
+                    rom.metadata().campaign);
+            world_group =
+                static_cast<std::uint8_t>(scenario.room.area);
+            center_room =
+                static_cast<std::uint8_t>(scenario.room.room);
+            spawn_position = scenario.player_spawn_yx;
+            force_object_overlay = false;
+        }
+        if (chest_scenario_mode) {
+            const auto scenario =
+                oracle::gameplay::chest_scenario(
                     rom.metadata().campaign);
             world_group =
                 static_cast<std::uint8_t>(scenario.room.area);
@@ -3445,6 +3596,37 @@ int main(int argc, char* argv[]) {
             << room_objects.records.size() << '\n'
             << "positioned_object_count="
             << positioned_object_count << '\n';
+        const oracle::content::ChestDataDecoder chest_decoder{rom};
+        const auto chest = chest_decoder.find(
+            oracle::core::WorldRoomId{
+                .area = world_group,
+                .room = center_room,
+            });
+        if (chest.has_value()) {
+            const auto treasure =
+                chest_decoder.describe_treasure(*chest);
+            std::cout
+                << "chest_position=" << std::hex << std::setw(2)
+                << std::setfill('0')
+                << static_cast<unsigned int>(chest->position) << '\n'
+                << "chest_treasure=" << std::setw(2)
+                << static_cast<unsigned int>(chest->treasure_index)
+                << ':' << std::setw(2)
+                << static_cast<unsigned int>(chest->treasure_subid) << '\n'
+                << "chest_treasure_parameter=" << std::setw(2)
+                << static_cast<unsigned int>(treasure.parameter) << '\n'
+                << "chest_treasure_graphics=" << std::setw(2)
+                << static_cast<unsigned int>(treasure.graphics) << '\n';
+            if (
+                chest->treasure_index ==
+                oracle::content::rupee_treasure_index) {
+                std::cout
+                    << "chest_rupees=" << std::dec
+                    << chest_decoder.rupee_value(treasure.parameter)
+                    << '\n';
+            }
+            std::cout << std::dec;
+        }
         if (spawn_position.has_value()) {
             const auto room = std::find_if(
                 rooms.begin(),
@@ -3586,6 +3768,7 @@ int main(int argc, char* argv[]) {
             force_diagnostic,
             force_collision_overlay,
             force_object_overlay,
+            chest_scenario_mode,
             room_flags,
             animation_tick,
             screenshot_path,

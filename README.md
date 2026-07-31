@@ -160,7 +160,7 @@ build/oracle_room_slice "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc"
 Controls:
 
 - in normal launch mode, `WASD` or arrow keys move Link;
-- `Z` or Enter interacts and advances dialogue; directions choose a dialogue
+- `Z` or Enter opens chests, interacts, and advances dialogue; directions choose a dialogue
   option; `X` attacks outside dialogue and cancels inside dialogue;
 - in `--atlas` mode, `WASD` or arrow keys pan the camera;
 - the mouse wheel zooms between overview and close-up scales;
@@ -170,6 +170,20 @@ Controls:
 - `F3` toggles anchors for ROM room objects whose actual actors are not yet
   simulated and rendered;
 - `Escape` exits.
+
+A ROM-only launch now opens the newest playable fidelity slice: a real dungeon
+chest whose record, treasure descriptor, and 30-rupee value are decoded from
+the supplied cartridge. Link starts below it; press `Z` or Enter. The same
+slice can be selected explicitly:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc --chest-scenario
+```
+
+The runtime replaces only that room's pixels and collision cache, sets the
+original `ROOMFLAG_ITEM`, and prevents repeat collection. The binary formats
+and current fidelity boundary are documented in
+[`docs/reverse-engineering/chest-and-treasure-data.md`](docs/reverse-engineering/chest-and-treasure-data.md).
 
 Launch the first deterministic actor-interaction scenario. The runtime chooses
 the correct Vasu shop for either campaign:

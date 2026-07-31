@@ -22,14 +22,18 @@ configuration output directory as the executable.
 - `OracleRoomSlice` builds the interactive BYO-ROM renderer. It is the default
   project to run and already has the local Ages US path configured as its only
   debugger argument. A ROM-only launch always opens the newest playable
-  fidelity slice, currently Octorok combat. This remains true when Visual
+  fidelity slice, currently the ROM-derived persistent rupee chest. Link
+  starts immediately below the chest; press `Z` or Enter to open it. The
+  original chest record, treasure parameter, 30-rupee value, opened tile, and
+  `ROOMFLAG_ITEM` persistence are active. This remains true when Visual
   Studio has cached an old `.vcxproj.user` launch entry. It renders authentic
   cartridge pixels plus Octorok, projectile, Link attack, and sword OAM, runs
   the shared native enemy/part/item state paths, applies enemy and projectile
   damage, and exposes `X` as the original arc-based sword swing. Defeated red
   Octoroks now retain hit flashing and knockback, animate the original death
   puff, and can leave collectible bouncing heart or rupee parts.
-  The Vasu scenario remains available with `--vasu-scenario`; use
+  Octorok combat remains available with `--octorok-scenario`. The Vasu
+  scenario remains available with `--vasu-scenario`; use
   `WASD`/arrows to move, `Z` to talk, and `F1` for the metatile diagnostic
   view. Use `--explore`, or explicit `--group` and `--room` arguments, to start
   in the original free-roaming room view instead.
