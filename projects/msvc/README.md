@@ -43,6 +43,11 @@ configuration output directory as the executable.
 To test Seasons, open `OracleRoomSlice` properties and replace the command
 argument under **Debugging** with the path to the Seasons US ROM.
 
+To measure performance without manually closing the window, append
+`--benchmark-frames 120` to the debugger arguments. The console reports total
+FPS and separate update, render, and presentation durations. The in-game
+diagnostic header also shows rolling FPS.
+
 Visual Studio stores the chosen startup project in its local `.vs` state, not
 in the tracked solution. Keep `OracleRoomSlice` selected when testing gameplay;
 the startup project does not need to change as new slices are added.

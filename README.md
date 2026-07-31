@@ -306,6 +306,13 @@ build/oracle_room_slice path/to/oracle.gbc \
   --room 91 --screenshot build/room-slice.bmp
 ```
 
+Run a fixed-length renderer benchmark and print update, render, and present
+timings:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc --benchmark-frames 120
+```
+
 Authentic rendering is the default. `--diagnostic` starts with deterministic
 metatile colors instead. The cartridge is decoded in memory at runtime; the
 repository and executable contain no extracted Nintendo graphics.
@@ -316,6 +323,8 @@ The staged room-state boundary is cataloged in
 [`docs/reverse-engineering/room-mutation-pipeline.md`](docs/reverse-engineering/room-mutation-pipeline.md).
 The world-group topology and atlas semantics are documented in
 [`docs/reverse-engineering/world-atlas-rendering.md`](docs/reverse-engineering/world-atlas-rendering.md).
+The visible-world update and texture-cropping optimization is documented in
+[`docs/architecture/visible-world-rendering.md`](docs/architecture/visible-world-rendering.md).
 The large-room format is documented in
 [`docs/reverse-engineering/large-room-rendering.md`](docs/reverse-engineering/large-room-rendering.md).
 The decoded traversal properties and collision profiles are documented in

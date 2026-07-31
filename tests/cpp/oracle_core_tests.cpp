@@ -41,6 +41,7 @@
 #include "oracle/presentation/camera.h"
 #include "oracle/presentation/frame_timing.h"
 #include "oracle/presentation/render_plan.h"
+#include "oracle/presentation/world_viewport.h"
 #include "oracle/presentation/world_scene.h"
 #include "oracle/script/campaign_script.h"
 #include "oracle/script/original_state.h"
@@ -1341,6 +1342,110 @@ void test_presentation_camera() {
         "presentation scene can contain multiple cached rooms");
 }
 
+void test_world_viewport_cropping() {
+    using oracle::presentation::calculate_world_viewport;
+    using oracle::presentation::crop_world_texture;
+    using oracle::presentation::intersects_world_viewport;
+
+    const auto viewport = calculate_world_viewport(
+        500.0,
+        300.0,
+        4.0,
+        1280,
+        720);
+    check_close(viewport.left, 340.0, "viewport left world edge");
+    check_close(viewport.top, 210.0, "viewport top world edge");
+    check_close(viewport.right, 660.0, "viewport right world edge");
+    check_close(viewport.bottom, 390.0, "viewport bottom world edge");
+    check(
+        intersects_world_viewport(
+            viewport,
+            480.0,
+            256.0,
+            160.0,
+            128.0),
+        "viewport retains an intersecting room");
+    check(
+        !intersects_world_viewport(
+            viewport,
+            180.0,
+            80.0,
+            160.0,
+            128.0),
+        "viewport rejects a room touching only its outside edge");
+
+    const auto centered = crop_world_texture(
+        0.0,
+        0.0,
+        2560,
+        2048,
+        500.0,
+        300.0,
+        4.0,
+        1280,
+        720);
+    check(
+        centered.has_value(),
+        "world texture crop exists inside the map");
+    if (centered.has_value()) {
+        check_close(
+            centered->source_x,
+            340.0,
+            "crop reads only the visible texture X");
+        check_close(
+            centered->source_y,
+            210.0,
+            "crop reads only the visible texture Y");
+        check_close(
+            centered->source_width,
+            320.0,
+            "crop source width matches visible world");
+        check_close(
+            centered->destination_width,
+            1280.0,
+            "crop fills the render output width");
+    }
+
+    const auto edge = crop_world_texture(
+        0.0,
+        0.0,
+        2560,
+        2048,
+        50.0,
+        50.0,
+        4.0,
+        1280,
+        720);
+    check(
+        edge.has_value(),
+        "world texture crop clamps at a map edge");
+    if (edge.has_value()) {
+        check_close(edge->source_x, 0.0, "edge crop clamps source X");
+        check_close(edge->source_y, 0.0, "edge crop clamps source Y");
+        check_close(
+            edge->destination_x,
+            440.0,
+            "edge crop preserves empty screen offset");
+        check_close(
+            edge->destination_y,
+            160.0,
+            "edge crop preserves vertical empty screen offset");
+    }
+    check(
+        !crop_world_texture(
+             0.0,
+             0.0,
+             2560,
+             2048,
+             5000.0,
+             5000.0,
+             4.0,
+             1280,
+             720)
+             .has_value(),
+        "off-map camera produces no world texture draw");
+}
+
 void test_experience_profiles() {
     using oracle::ExperiencePreset;
     using oracle::ExperienceSettings;
@@ -1859,6 +1964,7 @@ int main() {
     test_item_primitives();
     test_campaign_policy();
     test_presentation_camera();
+    test_world_viewport_cropping();
     test_experience_profiles();
     test_room_layout_decompression();
     test_graphics_decompression();

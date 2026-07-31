@@ -42,6 +42,7 @@
 #include "oracle/gameplay/vasu_interaction.h"
 #include "oracle/input/input_frame.h"
 #include "oracle/presentation/frame_timing.h"
+#include "oracle/presentation/world_viewport.h"
 
 namespace {
 
@@ -52,6 +53,31 @@ struct CameraState {
     double y{};
     double zoom{3.0};
 };
+
+oracle::presentation::WorldViewport world_viewport(
+    const CameraState camera,
+    const int output_width,
+    const int output_height,
+    const double margin = 0.0) {
+    return oracle::presentation::calculate_world_viewport(
+        camera.x,
+        camera.y,
+        camera.zoom,
+        output_width,
+        output_height,
+        margin);
+}
+
+bool intersects_viewport(
+    const RoomPlacement& placement,
+    const oracle::presentation::WorldViewport viewport) noexcept {
+    return oracle::presentation::intersects_world_viewport(
+        viewport,
+        placement.world_x,
+        placement.world_y,
+        placement.layout.pixel_width(),
+        placement.layout.pixel_height());
+}
 
 struct Color {
     std::uint8_t red{};
@@ -162,7 +188,12 @@ void render_diagnostic_region(
             (world_y - camera.y) * camera.zoom + output_height * 0.5);
     };
 
+    const auto viewport =
+        world_viewport(camera, output_width, output_height);
     for (const auto& placement : rooms) {
+        if (!intersects_viewport(placement, viewport)) {
+            continue;
+        }
         for (std::size_t row = 0;
              row < placement.layout.rows;
              ++row) {
@@ -248,7 +279,12 @@ void render_room_borders(
         return static_cast<float>(
             (world_y - camera.y) * camera.zoom + output_height * 0.5);
     };
+    const auto viewport =
+        world_viewport(camera, output_width, output_height);
     for (const auto& placement : rooms) {
+        if (!intersects_viewport(placement, viewport)) {
+            continue;
+        }
         const bool is_center = placement.layout.id.room == center_room;
         set_color(
             renderer,
@@ -286,10 +322,15 @@ void render_collision_overlay(
     };
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    const auto viewport =
+        world_viewport(camera, output_width, output_height);
     for (std::size_t room_index = 0;
          room_index < rooms.size();
          ++room_index) {
         const auto& placement = rooms[room_index];
+        if (!intersects_viewport(placement, viewport)) {
+            continue;
+        }
         const auto& map = collisions[room_index];
         for (std::size_t row = 0; row < map.rows; ++row) {
             for (std::size_t column = 0; column < map.columns; ++column) {
@@ -1170,39 +1211,13 @@ RegionPixels compose_region(
     return region;
 }
 
-std::uint64_t region_animation_signature(
-    const oracle::content::RoomPixelDecoder& decoder,
-    const RegionPixels& region,
-    const std::uint64_t animation_tick) {
-    constexpr std::uint64_t signature_prime = 1099511628211ull;
-    auto signature = 14695981039346656037ull;
-    std::array<std::optional<std::uint64_t>, 256> group_signatures;
-    for (const auto& room : region.rooms) {
-        const auto animation = room.tileset.animation;
-        auto& animation_signature =
-            group_signatures[animation];
-        if (!animation_signature.has_value()) {
-            animation_signature =
-                decoder.animation_signature(
-                    animation,
-                    animation_tick);
-        }
-        signature ^=
-            static_cast<std::uint8_t>(room.id.room);
-        signature *= signature_prime;
-        signature ^= *animation_signature;
-        signature *= signature_prime;
-    }
-    return signature;
-}
-
-std::vector<std::size_t> update_animated_rooms(
+std::vector<std::size_t> update_visible_animated_rooms(
     RegionPixels& region,
     const oracle::content::RoomPixelDecoder& decoder,
     const std::vector<RoomPlacement>& placements,
     const oracle::content::Season season,
     const std::uint64_t animation_tick,
-    const std::uint64_t target_signature) {
+    const oracle::presentation::WorldViewport viewport) {
     if (region.rooms.size() != placements.size()) {
         throw std::runtime_error{
             "animated room cache does not match world placements"};
@@ -1211,6 +1226,9 @@ std::vector<std::size_t> update_animated_rooms(
     std::vector<std::size_t> changed;
     for (std::size_t index = 0; index < placements.size(); ++index) {
         const auto& placement = placements[index];
+        if (!intersects_viewport(placement, viewport)) {
+            continue;
+        }
         const auto& cached = region.rooms[index];
         const auto group = cached.tileset.animation;
         auto& animation_signature = group_signatures[group];
@@ -1223,11 +1241,9 @@ std::vector<std::size_t> update_animated_rooms(
         }
         auto rendered =
             decoder.render(placement.layout, season, animation_tick);
-        copy_room_pixels(region, placement, rendered);
         region.rooms[index] = std::move(rendered);
         changed.push_back(index);
     }
-    region.animation_signature = target_signature;
     return changed;
 }
 
@@ -1783,6 +1799,7 @@ int run_window(
     const std::uint8_t room_flags,
     const std::uint64_t starting_animation_tick,
     std::optional<std::filesystem::path> screenshot_path,
+    const std::optional<std::uint32_t> benchmark_frames,
     const std::optional<std::uint8_t> spawn_position) {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         throw std::runtime_error{
@@ -2330,8 +2347,17 @@ int run_window(
         starting_animation_tick + 2;
     auto checked_animation_tick =
         std::numeric_limits<std::uint64_t>::max();
+    std::uint64_t presented_frames = 0;
+    auto benchmark_start_counter = SDL_GetPerformanceCounter();
+    auto fps_window_counter = benchmark_start_counter;
+    std::uint32_t fps_window_frames = 0;
+    double measured_fps = 0.0;
+    double benchmark_update_seconds = 0.0;
+    double benchmark_render_seconds = 0.0;
+    double benchmark_present_seconds = 0.0;
 
     while (running) {
+        const auto profile_frame_start = SDL_GetPerformanceCounter();
         SDL_Event event{};
         while (SDL_PollEvent(&event)) {
             if (
@@ -2612,50 +2638,48 @@ int run_window(
         if (
             authentic_region.has_value() &&
             checked_animation_tick != logic_tick) {
-            const auto signature =
-                region_animation_signature(
-                    pixel_decoder,
-                    *authentic_region,
-                    logic_tick);
             checked_animation_tick = logic_tick;
-            if (signature != authentic_region->animation_signature) {
-                const auto changed = update_animated_rooms(
-                    *authentic_region,
-                    pixel_decoder,
-                    rooms,
-                    season,
-                    logic_tick,
-                    signature);
-                for (const auto index : changed) {
-                    const auto& placement = rooms[index];
-                    const auto& rendered =
-                        authentic_region->rooms[index];
-                    const SDL_Rect rectangle{
-                        .x =
-                            placement.world_x -
-                            authentic_region->world_x,
-                        .y =
-                            placement.world_y -
-                            authentic_region->world_y,
-                        .w = rendered.width,
-                        .h = rendered.height,
-                    };
-                    if (!SDL_UpdateTexture(
-                            region_texture,
-                            &rectangle,
-                            rendered.pixels.data(),
-                            rendered.width *
-                                static_cast<int>(
-                                    sizeof(
-                                        oracle::content::RgbaPixel)))) {
-                        throw std::runtime_error{
-                            std::string{
-                                "animated room texture upload failed: "} +
-                            SDL_GetError()};
-                    }
+            const auto changed = update_visible_animated_rooms(
+                *authentic_region,
+                pixel_decoder,
+                rooms,
+                season,
+                logic_tick,
+                world_viewport(
+                    render_camera,
+                    output_width,
+                    output_height,
+                    oracle::content::metatile_world_size));
+            for (const auto index : changed) {
+                const auto& placement = rooms[index];
+                const auto& rendered =
+                    authentic_region->rooms[index];
+                const SDL_Rect rectangle{
+                    .x =
+                        placement.world_x -
+                        authentic_region->world_x,
+                    .y =
+                        placement.world_y -
+                        authentic_region->world_y,
+                    .w = rendered.width,
+                    .h = rendered.height,
+                };
+                if (!SDL_UpdateTexture(
+                        region_texture,
+                        &rectangle,
+                        rendered.pixels.data(),
+                        rendered.width *
+                            static_cast<int>(
+                                sizeof(
+                                    oracle::content::RgbaPixel)))) {
+                    throw std::runtime_error{
+                        std::string{
+                            "animated room texture upload failed: "} +
+                        SDL_GetError()};
                 }
             }
         }
+        const auto profile_update_end = SDL_GetPerformanceCounter();
         SDL_SetRenderDrawColor(renderer, 12, 16, 24, SDL_ALPHA_OPAQUE);
         SDL_RenderClear(renderer);
         if (diagnostic) {
@@ -2671,25 +2695,36 @@ int run_window(
                           current_player.room.room)
                     : center_room);
         } else {
-            const SDL_FRect destination{
-                .x = static_cast<float>(
-                    (authentic_region->world_x - render_camera.x) *
-                        render_camera.zoom +
-                    output_width * 0.5),
-                .y = static_cast<float>(
-                    (authentic_region->world_y - render_camera.y) *
-                        render_camera.zoom +
-                    output_height * 0.5),
-                .w = static_cast<float>(
-                    authentic_region->width * render_camera.zoom),
-                .h = static_cast<float>(
-                    authentic_region->height * render_camera.zoom),
-            };
-            SDL_RenderTexture(
-                renderer,
-                region_texture,
-                nullptr,
-                &destination);
+            const auto crop =
+                oracle::presentation::crop_world_texture(
+                    authentic_region->world_x,
+                    authentic_region->world_y,
+                    authentic_region->width,
+                    authentic_region->height,
+                    render_camera.x,
+                    render_camera.y,
+                    render_camera.zoom,
+                    output_width,
+                    output_height);
+            if (crop.has_value()) {
+                const SDL_FRect source{
+                    .x = static_cast<float>(crop->source_x),
+                    .y = static_cast<float>(crop->source_y),
+                    .w = static_cast<float>(crop->source_width),
+                    .h = static_cast<float>(crop->source_height),
+                };
+                const SDL_FRect destination{
+                    .x = static_cast<float>(crop->destination_x),
+                    .y = static_cast<float>(crop->destination_y),
+                    .w = static_cast<float>(crop->destination_width),
+                    .h = static_cast<float>(crop->destination_height),
+                };
+                SDL_RenderTexture(
+                    renderer,
+                    region_texture,
+                    &source,
+                    &destination);
+            }
             render_room_borders(
                 renderer,
                 rooms,
@@ -2917,7 +2952,9 @@ int run_window(
             << static_cast<unsigned int>(player_combat.maximum_health);
         diagnostic_line
             << " R "
-            << player_combat.rupees;
+            << player_combat.rupees
+            << " | FPS " << std::fixed << std::setprecision(1)
+            << measured_fps;
         if (
             last_combat_step.enemies_hit != 0 ||
             last_combat_step.enemies_defeated != 0 ||
@@ -2996,7 +3033,58 @@ int run_window(
             screenshot_path.reset();
             running = false;
         }
+        const auto profile_render_end = SDL_GetPerformanceCounter();
         SDL_RenderPresent(renderer);
+        const auto profile_present_end = SDL_GetPerformanceCounter();
+        if (benchmark_frames.has_value()) {
+            benchmark_update_seconds +=
+                static_cast<double>(
+                    profile_update_end - profile_frame_start) /
+                counter_frequency;
+            benchmark_render_seconds +=
+                static_cast<double>(
+                    profile_render_end - profile_update_end) /
+                counter_frequency;
+            benchmark_present_seconds +=
+                static_cast<double>(
+                    profile_present_end - profile_render_end) /
+                counter_frequency;
+        }
+        ++presented_frames;
+        ++fps_window_frames;
+        const auto presented_counter = SDL_GetPerformanceCounter();
+        const auto fps_elapsed =
+            static_cast<double>(
+                presented_counter - fps_window_counter) /
+            counter_frequency;
+        if (fps_elapsed >= 0.5) {
+            measured_fps =
+                static_cast<double>(fps_window_frames) / fps_elapsed;
+            fps_window_counter = presented_counter;
+            fps_window_frames = 0;
+        }
+        if (
+            benchmark_frames.has_value() &&
+            presented_frames >= *benchmark_frames) {
+            const auto benchmark_seconds =
+                static_cast<double>(
+                    presented_counter - benchmark_start_counter) /
+                counter_frequency;
+            std::cout
+                << "benchmark_frames=" << presented_frames << '\n'
+                << "benchmark_seconds=" << benchmark_seconds << '\n'
+                << "benchmark_fps="
+                << static_cast<double>(presented_frames) /
+                    benchmark_seconds
+                << '\n'
+                << "benchmark_update_seconds="
+                << benchmark_update_seconds << '\n'
+                << "benchmark_render_seconds="
+                << benchmark_render_seconds << '\n'
+                << "benchmark_present_seconds="
+                << benchmark_present_seconds << '\n';
+            running = false;
+        }
     }
 
     SDL_DestroyTexture(link_texture);
@@ -3044,7 +3132,8 @@ int main(int argc, char* argv[]) {
                    "[--octorok-scenario] "
                    "[--spawn-yx HEX] "
                    "[--tick N] [--room-flags HEX] "
-                   "[--describe] [--screenshot PATH]\n";
+                   "[--describe] [--screenshot PATH] "
+                   "[--benchmark-frames N]\n";
             return EXIT_FAILURE;
         }
 
@@ -3068,6 +3157,7 @@ int main(int argc, char* argv[]) {
         std::uint8_t room_flags = 0;
         std::optional<std::filesystem::path> region_output_path;
         std::optional<std::filesystem::path> screenshot_path;
+        std::optional<std::uint32_t> benchmark_frames;
         for (int index = 2; index < argc; ++index) {
             const std::string_view argument{argv[index]};
             if (argument == "--describe") {
@@ -3140,6 +3230,20 @@ int main(int argc, char* argv[]) {
                     std::filesystem::path{argv[++index]};
             } else if (argument == "--screenshot" && index + 1 < argc) {
                 screenshot_path = std::filesystem::path{argv[++index]};
+            } else if (
+                argument == "--benchmark-frames" &&
+                index + 1 < argc) {
+                const auto frames =
+                    parse_unsigned_integer(argv[++index]);
+                if (
+                    frames == 0 ||
+                    frames >
+                        std::numeric_limits<std::uint32_t>::max()) {
+                    throw std::invalid_argument{
+                        "benchmark frame count must fit uint32 and be nonzero"};
+                }
+                benchmark_frames =
+                    static_cast<std::uint32_t>(frames);
             } else {
                 throw std::invalid_argument{
                     "unknown or incomplete command-line argument"};
@@ -3479,6 +3583,7 @@ int main(int argc, char* argv[]) {
             room_flags,
             animation_tick,
             screenshot_path,
+            benchmark_frames,
             spawn_position);
     } catch (const std::exception& error) {
         std::cerr << "oracle_room_slice: " << error.what() << '\n';

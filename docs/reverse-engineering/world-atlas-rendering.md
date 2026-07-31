@@ -112,10 +112,12 @@ Git.
 ## Runtime behavior
 
 Initial atlas composition renders each room independently into one continuous
-world-space pixel surface. Animation signatures are cached per animation group.
-At runtime, only rooms whose selected animation frame changed are rerendered,
-and SDL receives one texture update per changed room rather than a full
-20 MiB atlas upload.
+world-space pixel surface. At runtime, animation signatures are calculated only
+for rooms intersecting the camera plus a one-metatile margin. A visible room is
+rerendered and uploaded only when its cached animation signature is stale.
+Off-screen rooms retain their cached pixels and refresh lazily before entering
+the visible margin. SDL therefore receives one texture update per changed,
+visible room rather than a full 20 MiB atlas upload.
 
 The atlas is a content and presentation diagnostic. It does not expand the
 active simulation region to 256 rooms, so enabling it cannot silently alter

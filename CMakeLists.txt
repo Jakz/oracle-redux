@@ -85,6 +85,7 @@ add_library(oracle_presentation
     src/presentation/camera.cpp
     src/presentation/frame_timing.cpp
     src/presentation/render_plan.cpp
+    src/presentation/world_viewport.cpp
 )
 target_include_directories(oracle_presentation PUBLIC include)
 target_compile_features(oracle_presentation PUBLIC cxx_std_20)
