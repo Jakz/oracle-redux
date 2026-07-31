@@ -1,0 +1,24 @@
+# Oracle Redux repository instructions
+
+These instructions apply to the entire repository and exist so work can
+continue safely across Codex sessions.
+
+Before changing code, read:
+
+1. `PROJECT_STATUS.md` for the current checkpoint and next queue;
+2. `docs/development/conventions.md` for source placement and C++ rules;
+3. the relevant architecture and reverse-engineering documents for the slice.
+
+Every completed implementation slice must:
+
+- update `PROJECT_STATUS.md` with what changed, what remains, and verification;
+- update or add the relevant reverse-engineering/architecture documentation;
+- keep public C++ headers as `.h` files under `include/oracle`;
+- place implementation files in the documented responsibility subfolder;
+- preserve the recursive MSVC project globs and matching `.vcxproj.filters`;
+- run the proportional CMake and MSVC verification listed in the status file;
+- be committed as one coherent checkpoint, leaving the worktree clean.
+
+Do not commit ROMs, extracted copyrighted assets, build products, local SDL
+checkouts, or Visual Studio user state. Gameplay remains a native C++
+behavioral reimplementation backed by a user-supplied validated ROM.

@@ -3,6 +3,11 @@
 Open `oracle-redux.sln` in Visual Studio and select `x64` with either the
 `Debug` or `Release` configuration.
 
+The solution groups the executable, tests, SDL dependency, and persistent
+project guidance separately. Each native project also has filters matching the
+physical responsibility folders under `src`, so Solution Explorer no longer
+presents the engine as one flat source list.
+
 ## One-time SDL setup
 
 The solution deliberately does not vendor SDL. If `reference/SDL` is missing,
@@ -28,7 +33,9 @@ configuration output directory as the executable.
   `ROOMFLAG_ITEM` persistence are active. This remains true when Visual
   Studio has cached an old `.vcxproj.user` launch entry. Press `Z` again after
   opening the chest to test the shared level-one Roc's Feather jump, including
-  ROM poses and fixed-point elevation. It renders authentic
+  ROM poses and fixed-point elevation. The status line also exposes the
+  ROM-derived terrain below Link; enemy and projectile contact uses the retail
+  Z-height boundary. It renders authentic
   cartridge pixels plus Octorok, projectile, Link attack, and sword OAM, runs
   the shared native enemy/part/item state paths, applies enemy and projectile
   damage, and exposes `X` as the original arc-based sword swing. Defeated red
@@ -73,4 +80,6 @@ state are ignored.
 
 The project files use recursive source globs. New engine `.cpp` files anywhere
 under `src`, native test `.cpp` files under `tests/cpp`, and public `.h` files
-under `include/oracle` are picked up without manually editing the solution.
+under `include/oracle` are picked up without manually editing the project.
+Place new files according to `docs/development/conventions.md` and add a
+matching filter entry when introducing a durable responsibility folder.

@@ -56,7 +56,7 @@
   </ItemDefinitionGroup>
 
   <ItemGroup>
-    <ClCompile Include="$(OracleRoot)apps\room_slice_main.cpp" />
+    <ClCompile Include="$(OracleRoot)apps\room_slice\main.cpp" />
     <ClCompile Include="$(OracleRoot)src\**\*.cpp" />
     <ClInclude Include="$(OracleRoot)include\oracle\**\*.h" />
   </ItemGroup>

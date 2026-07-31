@@ -4,6 +4,12 @@ This workspace is the beginning of a research-oriented C++ reimplementation of
 *The Legend of Zelda: Oracle of Seasons* and *Oracle of Ages* as two campaigns
 over one shared runtime.
 
+Current implementation progress and the next fidelity queue live in
+[`PROJECT_STATUS.md`](PROJECT_STATUS.md). Source placement, `.h` naming,
+verification, documentation, and per-slice commit rules live in
+[`docs/development/conventions.md`](docs/development/conventions.md); repository
+agents are required by [`AGENTS.md`](AGENTS.md) to keep both current.
+
 The repository does not distribute cartridge images. Put locally owned `.gb` or
 `.gbc` inputs in `roms/`; that directory is ignored.
 

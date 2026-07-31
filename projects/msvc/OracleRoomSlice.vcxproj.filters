@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Application" />
+    <Filter Include="Sources\Experience" />
+    <Filter Include="Sources\Input" />
+    <Filter Include="Sources\Content\ROM" />
+    <Filter Include="Sources\Content\World" />
+    <Filter Include="Sources\Content\Actors" />
+    <Filter Include="Sources\Content\Sprites" />
+    <Filter Include="Sources\Core\Actors" />
+    <Filter Include="Sources\Core\Items" />
+    <Filter Include="Sources\Core\World" />
+    <Filter Include="Sources\Gameplay\Actors" />
+    <Filter Include="Sources\Gameplay\Combat" />
+    <Filter Include="Sources\Gameplay\Interactions" />
+    <Filter Include="Sources\Gameplay\Items" />
+    <Filter Include="Sources\Gameplay\Player" />
+    <Filter Include="Sources\Presentation\Camera" />
+    <Filter Include="Sources\Presentation\Render" />
+    <Filter Include="Sources\Presentation\Timing" />
+    <Filter Include="Sources\Script\Runtime" />
+    <Filter Include="Sources\Script\State" />
+    <Filter Include="Public Headers\Experience" />
+    <Filter Include="Public Headers\Input" />
+    <Filter Include="Public Headers\Content\ROM" />
+    <Filter Include="Public Headers\Content\World" />
+    <Filter Include="Public Headers\Content\Actors" />
+    <Filter Include="Public Headers\Content\Sprites" />
+    <Filter Include="Public Headers\Core\Actors" />
+    <Filter Include="Public Headers\Core\Items" />
+    <Filter Include="Public Headers\Core\World" />
+    <Filter Include="Public Headers\Gameplay\Actors" />
+    <Filter Include="Public Headers\Gameplay\Combat" />
+    <Filter Include="Public Headers\Gameplay\Interactions" />
+    <Filter Include="Public Headers\Gameplay\Items" />
+    <Filter Include="Public Headers\Gameplay\Player" />
+    <Filter Include="Public Headers\Presentation\Camera" />
+    <Filter Include="Public Headers\Presentation\Render" />
+    <Filter Include="Public Headers\Presentation\Timing" />
+    <Filter Include="Public Headers\Script\Runtime" />
+    <Filter Include="Public Headers\Script\State" />
+    <Filter Include="Public Headers\UI" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(OracleRoot)apps\room_slice\main.cpp">
+      <Filter>Application</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\experience\*.cpp">
+      <Filter>Sources\Experience</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\input\*.cpp">
+      <Filter>Sources\Input</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\content\rom\*.cpp">
+      <Filter>Sources\Content\ROM</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\content\world\*.cpp">
+      <Filter>Sources\Content\World</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\content\actors\*.cpp">
+      <Filter>Sources\Content\Actors</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\content\sprites\*.cpp">
+      <Filter>Sources\Content\Sprites</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\core\actors\*.cpp">
+      <Filter>Sources\Core\Actors</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\core\items\*.cpp">
+      <Filter>Sources\Core\Items</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\core\world\*.cpp">
+      <Filter>Sources\Core\World</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\gameplay\actors\*.cpp">
+      <Filter>Sources\Gameplay\Actors</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\gameplay\combat\*.cpp">
+      <Filter>Sources\Gameplay\Combat</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\gameplay\interactions\*.cpp">
+      <Filter>Sources\Gameplay\Interactions</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\gameplay\items\*.cpp">
+      <Filter>Sources\Gameplay\Items</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\gameplay\player\*.cpp">
+      <Filter>Sources\Gameplay\Player</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\presentation\camera\*.cpp">
+      <Filter>Sources\Presentation\Camera</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\presentation\render\*.cpp">
+      <Filter>Sources\Presentation\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\presentation\timing\*.cpp">
+      <Filter>Sources\Presentation\Timing</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\script\runtime\*.cpp">
+      <Filter>Sources\Script\Runtime</Filter>
+    </ClCompile>
+    <ClCompile Include="$(OracleRoot)src\script\state\*.cpp">
+      <Filter>Sources\Script\State</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(OracleRoot)include\oracle\experience_settings.h">
+      <Filter>Public Headers\Experience</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\input\*.h">
+      <Filter>Public Headers\Input</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\content\rom*.h">
+      <Filter>Public Headers\Content\ROM</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\content\game_boy*.h">
+      <Filter>Public Headers\Content\ROM</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\content\room_*.h">
+      <Filter>Public Headers\Content\World</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\content\chest_data.h">
+      <Filter>Public Headers\Content\Actors</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\content\enemy_data.h">
+      <Filter>Public Headers\Content\Actors</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\content\part_data.h">
+      <Filter>Public Headers\Content\Actors</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\content\*_sprite.h">
+      <Filter>Public Headers\Content\Sprites</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\core\actor_*.h">
+      <Filter>Public Headers\Core\Actors</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\core\item_*.h">
+      <Filter>Public Headers\Core\Items</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\core\campaign.h">
+      <Filter>Public Headers\Core\World</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\core\simulation_region.h">
+      <Filter>Public Headers\Core\World</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\core\world_id.h">
+      <Filter>Public Headers\Core\World</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\actor_collision.h">
+      <Filter>Public Headers\Gameplay\Actors</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\object_contact.h">
+      <Filter>Public Headers\Gameplay\Actors</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\room_actor_loader.h">
+      <Filter>Public Headers\Gameplay\Actors</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\octorok_runtime.h">
+      <Filter>Public Headers\Gameplay\Combat</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\sword_runtime.h">
+      <Filter>Public Headers\Gameplay\Combat</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\interaction_target.h">
+      <Filter>Public Headers\Gameplay\Interactions</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\vasu_interaction.h">
+      <Filter>Public Headers\Gameplay\Interactions</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\chest_runtime.h">
+      <Filter>Public Headers\Gameplay\Items</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\feather_runtime.h">
+      <Filter>Public Headers\Gameplay\Items</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\gameplay\player_traversal.h">
+      <Filter>Public Headers\Gameplay\Player</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\presentation\camera.h">
+      <Filter>Public Headers\Presentation\Camera</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\presentation\world_viewport.h">
+      <Filter>Public Headers\Presentation\Camera</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\presentation\render_plan.h">
+      <Filter>Public Headers\Presentation\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\presentation\world_scene.h">
+      <Filter>Public Headers\Presentation\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\presentation\frame_timing.h">
+      <Filter>Public Headers\Presentation\Timing</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\script\campaign_script.h">
+      <Filter>Public Headers\Script\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\script\original_state.h">
+      <Filter>Public Headers\Script\State</Filter>
+    </ClInclude>
+    <ClInclude Include="$(OracleRoot)include\oracle\ui\*.h">
+      <Filter>Public Headers\UI</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

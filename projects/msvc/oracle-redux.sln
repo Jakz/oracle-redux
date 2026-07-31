@@ -8,6 +8,23 @@ Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "OracleRuntimeTests", "Oracl
 EndProject
 Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "SDL3", "..\..\reference\SDL\VisualC\SDL\SDL.vcxproj", "{81CE8DAF-EBB2-4761-8E45-B71ABCCA8C68}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Applications", "Applications", "{A1111111-1111-4111-8111-111111111111}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{B2222222-2222-4222-8222-222222222222}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Dependencies", "Dependencies", "{C3333333-3333-4333-8333-333333333333}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Project Guidance", "Project Guidance", "{D4444444-4444-4444-8444-444444444444}"
+	ProjectSection(SolutionItems) = preProject
+		..\..\AGENTS.md = ..\..\AGENTS.md
+		..\..\CMakeLists.txt = ..\..\CMakeLists.txt
+		..\..\PROJECT_STATUS.md = ..\..\PROJECT_STATUS.md
+		..\..\README.md = ..\..\README.md
+		..\..\docs\architecture\implementation-sequence.md = ..\..\docs\architecture\implementation-sequence.md
+		..\..\docs\development\conventions.md = ..\..\docs\development\conventions.md
+		README.md = README.md
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -27,5 +44,10 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{5E226468-B8ED-4DCF-912C-A78C10282C20} = {A1111111-1111-4111-8111-111111111111}
+		{CF8C0133-C2EE-43A6-83D6-916A8E4C004A} = {B2222222-2222-4222-8222-222222222222}
+		{81CE8DAF-EBB2-4761-8E45-B71ABCCA8C68} = {C3333333-3333-4333-8333-333333333333}
 	EndGlobalSection
 EndGlobal

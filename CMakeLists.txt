@@ -15,7 +15,7 @@ option(ORACLE_BUILD_TESTS "Build headless Oracle runtime tests" ON)
 option(ORACLE_BUILD_ROOM_SLICE "Build the standalone SDL3 room slice" ON)
 
 add_library(oracle_experience
-    src/experience_settings.cpp
+    src/experience/experience_settings.cpp
 )
 target_include_directories(oracle_experience PUBLIC include)
 target_compile_features(oracle_experience PUBLIC cxx_std_20)
@@ -27,58 +27,58 @@ target_include_directories(oracle_input PUBLIC include)
 target_compile_features(oracle_input PUBLIC cxx_std_20)
 
 add_library(oracle_core
-    src/core/actor_slot_domain.cpp
-    src/core/item_campaign_policy.cpp
-    src/core/item_runtime.cpp
-    src/core/simulation_region.cpp
+    src/core/actors/actor_slot_domain.cpp
+    src/core/items/item_campaign_policy.cpp
+    src/core/items/item_runtime.cpp
+    src/core/world/simulation_region.cpp
 )
 target_include_directories(oracle_core PUBLIC include)
 target_compile_features(oracle_core PUBLIC cxx_std_20)
 target_link_libraries(oracle_core PUBLIC oracle_experience)
 
 add_library(oracle_content
-    src/content/chest_data.cpp
-    src/content/enemy_data.cpp
-    src/content/enemy_sprite.cpp
-    src/content/game_boy_tiles.cpp
-    src/content/interaction_sprite.cpp
-    src/content/link_sprite.cpp
-    src/content/part_data.cpp
-    src/content/part_sprite.cpp
-    src/content/rom_source.cpp
-    src/content/rom_text.cpp
-    src/content/room_objects.cpp
-    src/content/room_collisions.cpp
-    src/content/room_layout.cpp
-    src/content/room_mutations.cpp
-    src/content/room_pixels.cpp
-    src/content/room_tile_types.cpp
-    src/content/room_topology.cpp
-    src/content/sword_sprite.cpp
+    src/content/actors/chest_data.cpp
+    src/content/actors/enemy_data.cpp
+    src/content/actors/part_data.cpp
+    src/content/rom/game_boy_tiles.cpp
+    src/content/rom/rom_source.cpp
+    src/content/rom/rom_text.cpp
+    src/content/sprites/enemy_sprite.cpp
+    src/content/sprites/interaction_sprite.cpp
+    src/content/sprites/link_sprite.cpp
+    src/content/sprites/part_sprite.cpp
+    src/content/sprites/sword_sprite.cpp
+    src/content/world/room_objects.cpp
+    src/content/world/room_collisions.cpp
+    src/content/world/room_layout.cpp
+    src/content/world/room_mutations.cpp
+    src/content/world/room_pixels.cpp
+    src/content/world/room_tile_types.cpp
+    src/content/world/room_topology.cpp
 )
 target_include_directories(oracle_content PUBLIC include)
 target_compile_features(oracle_content PUBLIC cxx_std_20)
 target_link_libraries(oracle_content PUBLIC oracle_core)
 
 add_library(oracle_script
-    src/script/campaign_script.cpp
-    src/script/original_state.cpp
+    src/script/runtime/campaign_script.cpp
+    src/script/state/original_state.cpp
 )
 target_include_directories(oracle_script PUBLIC include)
 target_compile_features(oracle_script PUBLIC cxx_std_20)
 target_link_libraries(oracle_script PUBLIC oracle_content oracle_input)
 
 add_library(oracle_gameplay
-    src/gameplay/actor_collision.cpp
-    src/gameplay/chest_runtime.cpp
-    src/gameplay/feather_runtime.cpp
-    src/gameplay/interaction_target.cpp
-    src/gameplay/object_contact.cpp
-    src/gameplay/octorok_runtime.cpp
-    src/gameplay/player_traversal.cpp
-    src/gameplay/room_actor_loader.cpp
-    src/gameplay/sword_runtime.cpp
-    src/gameplay/vasu_interaction.cpp
+    src/gameplay/actors/actor_collision.cpp
+    src/gameplay/actors/object_contact.cpp
+    src/gameplay/actors/room_actor_loader.cpp
+    src/gameplay/combat/octorok_runtime.cpp
+    src/gameplay/combat/sword_runtime.cpp
+    src/gameplay/interactions/interaction_target.cpp
+    src/gameplay/interactions/vasu_interaction.cpp
+    src/gameplay/items/chest_runtime.cpp
+    src/gameplay/items/feather_runtime.cpp
+    src/gameplay/player/player_traversal.cpp
 )
 target_include_directories(oracle_gameplay PUBLIC include)
 target_compile_features(oracle_gameplay PUBLIC cxx_std_20)
@@ -88,10 +88,10 @@ target_link_libraries(
 )
 
 add_library(oracle_presentation
-    src/presentation/camera.cpp
-    src/presentation/frame_timing.cpp
-    src/presentation/render_plan.cpp
-    src/presentation/world_viewport.cpp
+    src/presentation/camera/camera.cpp
+    src/presentation/camera/world_viewport.cpp
+    src/presentation/render/render_plan.cpp
+    src/presentation/timing/frame_timing.cpp
 )
 target_include_directories(oracle_presentation PUBLIC include)
 target_compile_features(oracle_presentation PUBLIC cxx_std_20)
@@ -126,7 +126,7 @@ if(ORACLE_BUILD_ROOM_SLICE)
     endif()
 
     if(TARGET SDL3::SDL3)
-        add_executable(oracle_room_slice apps/room_slice_main.cpp)
+        add_executable(oracle_room_slice apps/room_slice/main.cpp)
         target_link_libraries(
             oracle_room_slice
             PRIVATE
@@ -156,7 +156,10 @@ endif()
 
 if(ORACLE_BUILD_TESTS)
     enable_testing()
-    add_executable(oracle_core_tests tests/cpp/oracle_core_tests.cpp)
+    add_executable(
+        oracle_core_tests
+        tests/cpp/runtime/oracle_core_tests.cpp
+    )
     target_link_libraries(
         oracle_core_tests
         PRIVATE
