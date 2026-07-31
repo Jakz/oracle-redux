@@ -49,6 +49,8 @@
 #include "oracle/presentation/frame_timing.h"
 #include "oracle/presentation/world_viewport.h"
 
+#include "scenario_catalog.h"
+
 namespace {
 
 using oracle::content::RoomPlacement;
@@ -101,6 +103,108 @@ struct RegionPixels {
     std::vector<oracle::content::RgbaPixel> pixels;
     std::vector<oracle::content::RenderedRoom> rooms;
 };
+
+struct ScenarioSpawn {
+    oracle::core::WorldRoomId room;
+    std::uint8_t packed_position{};
+    oracle::gameplay::PlayerFacing facing{
+        oracle::gameplay::PlayerFacing::south};
+};
+
+ScenarioSpawn find_ordinary_hole_scenario(
+    const oracle::content::RoomLayoutDecoder& layout_decoder,
+    const oracle::content::RoomPixelDecoder& pixel_decoder,
+    const oracle::content::RoomCollisionDecoder& collision_decoder,
+    const oracle::content::RoomTileTypeDecoder& tile_type_decoder,
+    const oracle::content::Season season) {
+    struct Neighbor {
+        int column_delta{};
+        int row_delta{};
+        oracle::gameplay::PlayerFacing facing{};
+    };
+    constexpr std::array neighbors{
+        Neighbor{0, -1, oracle::gameplay::PlayerFacing::south},
+        Neighbor{1, 0, oracle::gameplay::PlayerFacing::west},
+        Neighbor{0, 1, oracle::gameplay::PlayerFacing::north},
+        Neighbor{-1, 0, oracle::gameplay::PlayerFacing::east},
+    };
+
+    for (std::uint8_t world_group = 0; world_group < 4; ++world_group) {
+        for (unsigned int room_value = 0; room_value <= 0xff; ++room_value) {
+            const auto room = static_cast<std::uint8_t>(room_value);
+            const auto tileset = pixel_decoder.describe_tileset(
+                world_group,
+                room,
+                season);
+            if (
+                layout_decoder.layout_kind(tileset.layout_group) !=
+                oracle::content::RoomLayoutKind::small) {
+                continue;
+            }
+            const auto layout = layout_decoder.decode_small_room(
+                world_group,
+                tileset.layout_group,
+                room);
+            const auto tile_types =
+                tile_type_decoder.decode(layout, tileset);
+            const auto collisions =
+                collision_decoder.decode(layout, tileset);
+            for (std::size_t row = 0; row < layout.rows; ++row) {
+                for (std::size_t column = 0;
+                     column < layout.columns;
+                     ++column) {
+                    if (
+                        tile_types.at(column, row) !=
+                        oracle::content::LinkTileType::hole) {
+                        continue;
+                    }
+                    for (const auto neighbor : neighbors) {
+                        const auto candidate_column =
+                            static_cast<int>(column) +
+                            neighbor.column_delta;
+                        const auto candidate_row =
+                            static_cast<int>(row) + neighbor.row_delta;
+                        if (
+                            candidate_column < 0 ||
+                            candidate_row < 0 ||
+                            candidate_column >=
+                                static_cast<int>(layout.columns) ||
+                            candidate_row >=
+                                static_cast<int>(layout.rows)) {
+                            continue;
+                        }
+                        const auto safe_column =
+                            static_cast<std::size_t>(candidate_column);
+                        const auto safe_row =
+                            static_cast<std::size_t>(candidate_row);
+                        if (
+                            tile_types.at(safe_column, safe_row) !=
+                                oracle::content::LinkTileType::normal ||
+                            oracle::content::RoomCollisionDecoder::is_solid(
+                                collisions.at(safe_column, safe_row),
+                                8,
+                                8)) {
+                            continue;
+                        }
+                        return ScenarioSpawn{
+                            .room = oracle::core::WorldRoomId{
+                                .area = world_group,
+                                .room = room,
+                            },
+                            .packed_position =
+                                static_cast<std::uint8_t>(
+                                    ((safe_row + 1) << 4u) |
+                                    safe_column),
+                            .facing = neighbor.facing,
+                        };
+                    }
+                }
+            }
+        }
+    }
+    throw std::runtime_error{
+        "supported ROM contains no reachable ordinary-hole scenario"};
+}
 
 std::uint8_t parse_hex_byte(const std::string_view text) {
     auto normalized = text;
@@ -1812,6 +1916,8 @@ int run_window(
     const bool force_collision_overlay,
     const bool force_object_overlay,
     const bool chest_scenario_mode,
+    const std::string_view scenario_name,
+    const std::optional<oracle::gameplay::PlayerFacing> scenario_facing,
     const std::uint8_t room_flags,
     const std::uint64_t starting_animation_tick,
     std::optional<std::filesystem::path> screenshot_path,
@@ -2155,24 +2261,8 @@ int run_window(
             ? rooms.front().layout.pixel_height() * 0.5
             : oracle::content::small_room_world_height * 0.5,
     };
-    const auto selected_vasu_scenario =
-        oracle::gameplay::vasu_scenario(rom.metadata().campaign);
-    const auto selected_octorok_scenario =
-        oracle::gameplay::octorok_scenario(rom.metadata().campaign);
-    const auto selected_chest_scenario =
-        oracle::gameplay::chest_scenario(rom.metadata().campaign);
-    if (
-        (
-            spawn_position == selected_vasu_scenario.player_spawn_yx &&
-            initial_player.room == selected_vasu_scenario.room) ||
-        (
-            spawn_position == selected_octorok_scenario.player_spawn_yx &&
-            initial_player.room == selected_octorok_scenario.room) ||
-        (
-            spawn_position == selected_chest_scenario.player_spawn_yx &&
-            initial_player.room == selected_chest_scenario.room)) {
-        initial_player.facing =
-            oracle::gameplay::PlayerFacing::north;
+    if (scenario_facing.has_value()) {
+        initial_player.facing = *scenario_facing;
     }
     if (
         player_mode &&
@@ -3182,7 +3272,8 @@ int run_window(
         SDL_RenderFillRect(renderer, &panel);
         SDL_SetRenderDrawColor(renderer, 232, 238, 248, SDL_ALPHA_OPAQUE);
         const std::string line_one = player_mode
-            ? "ROM runtime | WASD/arrows: move | Z/Enter: open/talk | X: sword/back"
+            ? "ROM runtime [" + std::string{scenario_name} +
+                  "] | WASD/arrows: move | Z/Enter: open/talk | X: sword/back"
             : "Authentic ROM pixels | WASD/arrows: pan | wheel: zoom";
         const std::string line_two =
             diagnostic
@@ -3421,6 +3512,8 @@ int main(int argc, char* argv[]) {
                    "[--collisions] [--objects] "
                    "[--list-exits] [--follow-exit N] "
                    "[--catalog-topology] [--catalog-objects] "
+                   "[--scenario NAME] [--scenario-menu] "
+                   "[--list-scenarios] "
                    "[--explore] [--vasu-scenario] "
                    "[--chest-scenario] "
                    "[--octorok-scenario] "
@@ -3445,6 +3538,10 @@ int main(int argc, char* argv[]) {
         bool chest_scenario_mode = false;
         bool octorok_scenario_mode = false;
         bool manual_world_selection = false;
+        bool scenario_menu = false;
+        bool list_scenarios = false;
+        std::optional<oracle::room_slice::ScenarioId> selected_scenario;
+        std::optional<oracle::gameplay::PlayerFacing> scenario_facing;
         std::optional<std::size_t> follow_exit_index;
         std::optional<std::uint8_t> spawn_position;
         auto season = oracle::content::Season::spring;
@@ -3453,6 +3550,16 @@ int main(int argc, char* argv[]) {
         std::optional<std::filesystem::path> region_output_path;
         std::optional<std::filesystem::path> screenshot_path;
         std::optional<std::uint32_t> benchmark_frames;
+        const auto choose_scenario =
+            [&](const oracle::room_slice::ScenarioId scenario) {
+                if (
+                    selected_scenario.has_value() &&
+                    *selected_scenario != scenario) {
+                    throw std::invalid_argument{
+                        "select at most one playable scenario"};
+                }
+                selected_scenario = scenario;
+            };
         for (int index = 2; index < argc; ++index) {
             const std::string_view argument{argv[index]};
             if (argument == "--describe") {
@@ -3481,11 +3588,25 @@ int main(int argc, char* argv[]) {
                 describe_only = true;
                 manual_world_selection = true;
             } else if (argument == "--vasu-scenario") {
-                vasu_scenario_mode = true;
+                choose_scenario(oracle::room_slice::ScenarioId::vasu);
             } else if (argument == "--chest-scenario") {
-                chest_scenario_mode = true;
+                choose_scenario(oracle::room_slice::ScenarioId::chest);
             } else if (argument == "--octorok-scenario") {
-                octorok_scenario_mode = true;
+                choose_scenario(oracle::room_slice::ScenarioId::octorok);
+            } else if (argument == "--scenario-menu") {
+                scenario_menu = true;
+            } else if (argument == "--list-scenarios") {
+                list_scenarios = true;
+            } else if (
+                argument == "--scenario" &&
+                index + 1 < argc) {
+                const auto scenario =
+                    oracle::room_slice::scenario_from_name(argv[++index]);
+                if (!scenario.has_value()) {
+                    throw std::invalid_argument{
+                        "unknown scenario name; use --list-scenarios"};
+                }
+                choose_scenario(*scenario);
             } else if (
                 argument == "--follow-exit" &&
                 index + 1 < argc) {
@@ -3546,20 +3667,44 @@ int main(int argc, char* argv[]) {
                     "unknown or incomplete command-line argument"};
             }
         }
-        const auto scenario_count =
-            static_cast<unsigned int>(vasu_scenario_mode) +
-            static_cast<unsigned int>(chest_scenario_mode) +
-            static_cast<unsigned int>(octorok_scenario_mode);
-        if (scenario_count > 1) {
-            throw std::invalid_argument{
-                "select at most one playable scenario"};
+        if (list_scenarios) {
+            oracle::room_slice::print_scenario_catalog(std::cout);
+            return EXIT_SUCCESS;
         }
-        if (
-            !manual_world_selection &&
-            !vasu_scenario_mode &&
-            !chest_scenario_mode &&
-            !octorok_scenario_mode) {
-            chest_scenario_mode = true;
+        if (scenario_menu && selected_scenario.has_value()) {
+            throw std::invalid_argument{
+                "--scenario-menu cannot be combined with --scenario"};
+        }
+        if (scenario_menu) {
+            selected_scenario = oracle::room_slice::select_scenario(
+                std::cin,
+                std::cout);
+        }
+        if (!manual_world_selection && !selected_scenario.has_value()) {
+            selected_scenario = oracle::room_slice::ScenarioId::latest;
+        }
+        if (selected_scenario.has_value()) {
+            switch (*selected_scenario) {
+            case oracle::room_slice::ScenarioId::latest:
+            case oracle::room_slice::ScenarioId::chest:
+                chest_scenario_mode = true;
+                break;
+            case oracle::room_slice::ScenarioId::vasu:
+                vasu_scenario_mode = true;
+                break;
+            case oracle::room_slice::ScenarioId::octorok:
+                octorok_scenario_mode = true;
+                break;
+            case oracle::room_slice::ScenarioId::explore:
+                manual_world_selection = true;
+                break;
+            case oracle::room_slice::ScenarioId::hole:
+                break;
+            case oracle::room_slice::ScenarioId::atlas:
+                manual_world_selection = true;
+                atlas_mode = true;
+                break;
+            }
         }
         if (world_group >= 8) {
             throw std::invalid_argument{
@@ -3571,6 +3716,13 @@ int main(int argc, char* argv[]) {
         }
 
         const auto rom = oracle::content::RomSource::load(rom_path);
+        const oracle::content::RoomLayoutDecoder layout_decoder{rom};
+        const oracle::content::RoomPixelDecoder pixel_decoder{rom};
+        const oracle::content::RoomCollisionDecoder collision_decoder{rom};
+        const oracle::content::RoomMutationDecoder mutation_decoder{rom};
+        const oracle::content::RoomObjectDecoder object_decoder{rom};
+        const oracle::content::RoomTopologyDecoder topology_decoder{rom};
+        const oracle::content::RoomTileTypeDecoder tile_type_decoder{rom};
         if (vasu_scenario_mode) {
             const auto scenario =
                 oracle::gameplay::vasu_scenario(
@@ -3580,6 +3732,7 @@ int main(int argc, char* argv[]) {
             center_room =
                 static_cast<std::uint8_t>(scenario.room.room);
             spawn_position = scenario.player_spawn_yx;
+            scenario_facing = oracle::gameplay::PlayerFacing::north;
             force_object_overlay = false;
         }
         if (chest_scenario_mode) {
@@ -3591,6 +3744,7 @@ int main(int argc, char* argv[]) {
             center_room =
                 static_cast<std::uint8_t>(scenario.room.room);
             spawn_position = scenario.player_spawn_yx;
+            scenario_facing = oracle::gameplay::PlayerFacing::north;
             force_object_overlay = false;
         }
         if (octorok_scenario_mode) {
@@ -3602,14 +3756,28 @@ int main(int argc, char* argv[]) {
             center_room =
                 static_cast<std::uint8_t>(scenario.room.room);
             spawn_position = scenario.player_spawn_yx;
+            scenario_facing = oracle::gameplay::PlayerFacing::north;
             force_object_overlay = false;
         }
-        const oracle::content::RoomLayoutDecoder layout_decoder{rom};
-        const oracle::content::RoomPixelDecoder pixel_decoder{rom};
-        const oracle::content::RoomCollisionDecoder collision_decoder{rom};
-        const oracle::content::RoomMutationDecoder mutation_decoder{rom};
-        const oracle::content::RoomObjectDecoder object_decoder{rom};
-        const oracle::content::RoomTopologyDecoder topology_decoder{rom};
+        if (
+            selected_scenario ==
+            oracle::room_slice::ScenarioId::hole) {
+            const auto scenario = find_ordinary_hole_scenario(
+                layout_decoder,
+                pixel_decoder,
+                collision_decoder,
+                tile_type_decoder,
+                season);
+            world_group = static_cast<std::uint8_t>(scenario.room.area);
+            center_room = static_cast<std::uint8_t>(scenario.room.room);
+            spawn_position = scenario.packed_position;
+            scenario_facing = scenario.facing;
+            force_object_overlay = false;
+        }
+        const auto selected_scenario_name = selected_scenario.has_value()
+            ? oracle::room_slice::describe_scenario(*selected_scenario).name
+            : std::string_view{"custom"};
+        std::cout << "scenario=" << selected_scenario_name << '\n';
         const auto destination_variant =
             static_cast<std::uint8_t>(season);
         if (catalog_topology) {
@@ -3929,6 +4097,8 @@ int main(int argc, char* argv[]) {
             force_collision_overlay,
             force_object_overlay,
             chest_scenario_mode,
+            selected_scenario_name,
+            scenario_facing,
             room_flags,
             animation_tick,
             screenshot_path,

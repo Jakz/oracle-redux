@@ -13,6 +13,7 @@ docs/architecture/       durable engine decisions and subsystem designs
 docs/reverse-engineering/ROM evidence, formats, addresses, and fidelity bounds
 projects/msvc/           hand-maintained Visual Studio solution and filters
 reference/               ignored or separately sourced external references
+specs/slices.json        machine-readable breadth, status, and scenario matrix
 tools/                   analysis and trace tooling
 ```
 
@@ -79,10 +80,13 @@ role or an upcoming slice establishes a durable subsystem. Avoid generic
 1. Read `PROJECT_STATUS.md` and relevant design/evidence documents.
 2. Define one observable, bounded checkpoint and its deferred boundary.
 3. Implement with ROM-derived evidence and headless regression coverage.
-4. Update the relevant documentation and `PROJECT_STATUS.md`.
+4. Update the relevant documentation, `PROJECT_STATUS.md`, and the matching
+   `specs/slices.json` status/gaps/scenario entry.
 5. Run proportional CMake, Python, MSVC, and launch verification.
 6. Commit the coherent slice and leave no unrelated or uncommitted changes.
 
 If a slice discovers that the next queue is wrong, update the queue rather
 than preserving a stale plan. Git history is evidence; `PROJECT_STATUS.md` is
-the current handoff.
+the current handoff; `specs/slices.json` is the cross-subsystem breadth view.
+The detailed status vocabulary and breadth rule live in
+`docs/development/slice-management.md`.

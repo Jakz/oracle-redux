@@ -25,24 +25,21 @@ configuration output directory as the executable.
 ## Projects
 
 - `OracleRoomSlice` builds the interactive BYO-ROM renderer. It is the default
-  project to run and already has the local Ages US path configured as its only
-  debugger argument. A ROM-only launch always opens the newest playable
-  fidelity slice, currently the ROM-derived persistent rupee chest. Link
-  starts immediately below the chest; press `Z` or Enter to open it. The
-  original chest record, treasure parameter, 30-rupee value, opened tile, and
-  `ROOMFLAG_ITEM` persistence are active. This remains true when Visual
-  Studio has cached an old `.vcxproj.user` launch entry. Press `Z` again after
-  opening the chest to test the shared level-one Roc's Feather jump, including
-  ROM poses and fixed-point elevation. The status line also exposes the
-  ROM-derived terrain below Link; enemy and projectile contact uses the retail
-  Z-height boundary. It renders authentic
+  project to run and has the local Ages US path plus `--scenario-menu`
+  configured as its debugger arguments. Press `F5`, choose a scenario by
+  number or name in the console, and keep the same startup project for every
+  implemented feature. The menu includes `latest`, `explore`, `chest`,
+  `vasu`, `octorok`, `hole`, and `atlas`. The hole scenario scans the supplied
+  campaign ROM for an ordinary hole with an adjacent safe spawn, so it works
+  for both Ages and Seasons without extracted or hard-coded room content. It
+  renders authentic
   cartridge pixels plus Octorok, projectile, Link attack, and sword OAM, runs
   the shared native enemy/part/item state paths, applies enemy and projectile
   damage, and exposes `X` as the original arc-based sword swing. Defeated red
   Octoroks now retain hit flashing and knockback, animate the original death
   puff, and can leave collectible bouncing heart or rupee parts.
-  Octorok combat remains available with `--octorok-scenario`. The Vasu
-  scenario remains available with `--vasu-scenario`; use
+  Legacy `--octorok-scenario`, `--vasu-scenario`, and `--chest-scenario`
+  remain compatibility aliases; use
   `WASD`/arrows to move, `Z` to talk, and `F1` for the metatile diagnostic
   view. Use `--explore`, or explicit `--group` and `--room` arguments, to start
   in the original free-roaming room view instead.
@@ -53,8 +50,12 @@ configuration output directory as the executable.
   startup project and press `Ctrl+F5`, when you want to run the native suite.
 - `SDL3` is the unmodified project from the ignored SDL checkout.
 
-To test Seasons, open `OracleRoomSlice` properties and replace the command
-argument under **Debugging** with the path to the Seasons US ROM.
+To test Seasons, open `OracleRoomSlice` properties, select **Debugging**, and
+replace the ROM path in the evaluated command arguments while keeping
+`--scenario-menu`. Visual Studio stores this local override outside Git. For
+a fixed automated launch, replace the menu argument with `--scenario
+octorok` (or another name). Run `--list-scenarios` to print the complete
+catalog and exit.
 
 To measure performance without manually closing the window, append
 `--benchmark-frames 120` to the debugger arguments. The console reports total
@@ -64,6 +65,11 @@ diagnostic header also shows rolling FPS.
 Visual Studio stores the chosen startup project in its local `.vs` state, not
 in the tracked solution. Keep `OracleRoomSlice` selected when testing gameplay;
 the startup project does not need to change as new slices are added.
+
+Project-wide breadth and remaining gaps are tracked in
+`../../specs/slices.json`. Run `python ../../tools/slice_status.py` from this
+directory, or the equivalent command from the repository root, for the live
+cross-subsystem summary.
 
 ## Command-line build
 

@@ -230,6 +230,22 @@ The aftermath trace is in
 The parent-item timing, arc, and OAM map is in
 [`docs/reverse-engineering/sword-swing-slice.md`](docs/reverse-engineering/sword-swing-slice.md).
 
+All playable developer checkpoints are also available through the stable
+named selector:
+
+```sh
+build/oracle_room_slice path/to/oracle.gbc --list-scenarios
+build/oracle_room_slice path/to/oracle.gbc --scenario hole
+build/oracle_room_slice path/to/oracle.gbc --scenario-menu
+```
+
+The same interactive menu is the default when launching `OracleRoomSlice`
+from `projects/msvc/oracle-redux.sln`. The ROM-derived `hole` scenario starts
+beside a suitable ordinary hole in either campaign. Broad subsystem status,
+scenario coverage, dependencies, verification, and known gaps are tracked in
+[`specs/slices.json`](specs/slices.json) and summarized with
+`python tools/slice_status.py`.
+
 Choose another room by its hexadecimal overworld coordinate:
 
 ```sh

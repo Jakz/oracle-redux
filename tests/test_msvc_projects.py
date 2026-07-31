@@ -23,6 +23,8 @@ class MsvcProjectTests(unittest.TestCase):
             self.assertIn(folder, solution)
         self.assertIn(r"..\..\PROJECT_STATUS.md", solution)
         self.assertIn(r"..\..\docs\development\conventions.md", solution)
+        self.assertIn(r"..\..\docs\development\slice-management.md", solution)
+        self.assertIn(r"..\..\specs\slices.json", solution)
 
     def test_projects_track_engine_sources_recursively(self) -> None:
         for name in ("OracleRoomSlice.vcxproj", "OracleRuntimeTests.vcxproj"):
@@ -60,7 +62,8 @@ class MsvcProjectTests(unittest.TestCase):
         room_filters = (MSVC / "OracleRoomSlice.vcxproj.filters").read_text(
             encoding="utf-8"
         )
-        self.assertIn(r"apps\room_slice\main.cpp", room_filters)
+        self.assertIn(r"apps\room_slice\*.cpp", room_filters)
+        self.assertIn(r"apps\room_slice\*.h", room_filters)
         test_filters = (MSVC / "OracleRuntimeTests.vcxproj.filters").read_text(
             encoding="utf-8"
         )
@@ -72,7 +75,9 @@ class MsvcProjectTests(unittest.TestCase):
         )
         self.assertIn("LocalDebuggerCommandArguments", project)
         self.assertIn("Oracle of Ages (USA).gbc", project)
-        self.assertNotIn("--octorok-scenario", project)
+        self.assertIn("--scenario-menu", project)
+        self.assertIn("OracleRomPath", project)
+        self.assertIn(r'apps\room_slice\*.cpp', project)
 
 
 if __name__ == "__main__":

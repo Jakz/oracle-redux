@@ -127,7 +127,12 @@ if(ORACLE_BUILD_ROOM_SLICE)
     endif()
 
     if(TARGET SDL3::SDL3)
-        add_executable(oracle_room_slice apps/room_slice/main.cpp)
+        add_executable(
+            oracle_room_slice
+            apps/room_slice/main.cpp
+            apps/room_slice/scenario_catalog.cpp
+            apps/room_slice/scenario_catalog.h
+        )
         target_link_libraries(
             oracle_room_slice
             PRIVATE

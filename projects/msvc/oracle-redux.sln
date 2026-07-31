@@ -22,6 +22,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Project Guidance", "Project
 		..\..\README.md = ..\..\README.md
 		..\..\docs\architecture\implementation-sequence.md = ..\..\docs\architecture\implementation-sequence.md
 		..\..\docs\development\conventions.md = ..\..\docs\development\conventions.md
+		..\..\docs\development\slice-management.md = ..\..\docs\development\slice-management.md
+		..\..\specs\slices.json = ..\..\specs\slices.json
 		README.md = README.md
 	EndProjectSection
 EndProject

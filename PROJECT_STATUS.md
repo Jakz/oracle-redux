@@ -23,6 +23,14 @@ The current structural checkpoint groups implementation files by responsibility
 while preserving stable public include paths. Visual Studio mirrors the same
 tree with solution folders and project filters.
 
+Broad-spectrum progress is tracked in `specs/slices.json`: 31 slices across
+foundation, world, traversal, interactions, combat, items, hazards,
+persistence, audio, presentation, UI, campaign-content, and verification.
+`python tools/slice_status.py` validates and summarizes the live matrix.
+The MSVC room-slice launch now opens a named scenario menu covering the latest
+integrated room, exploration, chest, Vasu, Octorok, ROM-derived ordinary hole,
+and whole-world atlas paths without changing startup projects or rebuilding.
+
 ## Completed slices
 
 - ROM validation, campaign cataloguing, routine-overlap analysis, and the
@@ -41,6 +49,7 @@ tree with solution folders and project filters.
 - Shared ordinary-hole pull, fall frames, local respawn, damage, and recovery.
 - CMake and hand-maintained MSVC build paths, with the room slice as the
   practical Visual Studio launch target.
+- Machine-validated broad-spectrum slice matrix and named developer scenarios.
 
 ## Next implementation queue
 
@@ -76,6 +85,7 @@ Run after ordinary engine changes:
 cmake --build build --target oracle_core_tests oracle_room_slice --config Debug
 ctest --test-dir build -C Debug --output-on-failure
 python -m unittest discover -s tests
+python tools/slice_status.py --check
 ```
 
 Run before committing changes that affect project structure or launchability:
@@ -93,6 +103,7 @@ benchmark frames with a locally supplied supported ROM.
 
 | Date | Slice | Result | Verification |
 | --- | --- | --- | --- |
+| 2026-07-31 | Slice matrix and scenario selector | 31 cross-subsystem entries plus named/interactive dual-campaign developer scenarios | CMake/native tests, Python catalog checks, both MSVC projects, all scenario smoke tests |
 | 2026-07-31 | Ordinary hole lifecycle | Shared pull, retail fall frames, hidden checkpoint respawn, damage and recovery | CMake/native tests, Python, both MSVC projects, launch smoke test |
 | 2026-07-31 | Source-tree and MSVC organization | Implementations grouped by responsibility; persistent workflow/status conventions added | CMake, Python, both MSVC projects, native tests, launch smoke test |
 | 2026-07-31 | Link terrain and Z contact | Both ROM tile-type tables, Y+5 sample, landing report, exact Z gate | CMake/native tests, both MSVC projects, launch smoke test |

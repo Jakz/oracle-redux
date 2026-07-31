@@ -72,6 +72,9 @@ class CppConventionTests(unittest.TestCase):
         self.assertIn("update `PROJECT_STATUS.md`", agents)
         self.assertIn("leaving the worktree clean", agents)
         self.assertTrue((ROOT / "docs/development/conventions.md").is_file())
+        self.assertTrue((ROOT / "docs/development/slice-management.md").is_file())
+        self.assertTrue((ROOT / "specs/slices.json").is_file())
+        self.assertIn("specs/slices.json", agents)
 
 
 if __name__ == "__main__":

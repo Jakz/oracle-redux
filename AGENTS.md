@@ -12,11 +12,14 @@ Before changing code, read:
 Every completed implementation slice must:
 
 - update `PROJECT_STATUS.md` with what changed, what remains, and verification;
+- update `specs/slices.json` when status, priority, gaps, dependencies, or
+  developer-scenario coverage changes;
 - update or add the relevant reverse-engineering/architecture documentation;
 - keep public C++ headers as `.h` files under `include/oracle`;
 - place implementation files in the documented responsibility subfolder;
 - preserve the recursive MSVC project globs and matching `.vcxproj.filters`;
 - run the proportional CMake and MSVC verification listed in the status file;
+- run `python tools/slice_status.py --check`;
 - be committed as one coherent checkpoint, leaving the worktree clean.
 
 Do not commit ROMs, extracted copyrighted assets, build products, local SDL
