@@ -52,6 +52,7 @@ add_library(oracle_content
     src/content/room_layout.cpp
     src/content/room_mutations.cpp
     src/content/room_pixels.cpp
+    src/content/room_tile_types.cpp
     src/content/room_topology.cpp
     src/content/sword_sprite.cpp
 )
@@ -72,6 +73,7 @@ add_library(oracle_gameplay
     src/gameplay/chest_runtime.cpp
     src/gameplay/feather_runtime.cpp
     src/gameplay/interaction_target.cpp
+    src/gameplay/object_contact.cpp
     src/gameplay/octorok_runtime.cpp
     src/gameplay/player_traversal.cpp
     src/gameplay/room_actor_loader.cpp

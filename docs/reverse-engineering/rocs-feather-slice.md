@@ -53,14 +53,15 @@ separate fidelity work:
 
 - side-scrolling Feather physics;
 - Seasons level-two Roc's Cape chaining;
-- hole, water, lava, trampoline, and cliff landing reactions;
-- Z-aware enemy, projectile, and solid-actor contact;
+- hole, water, and lava landing reactions;
+- trampoline and cliff-specific airborne policies;
 - jump and landing sound events in the future audio service.
 
-Until tile-type reactions are implemented, special terrain that is enterable
-under Link's ordinary collision profile does not yet trigger its retail fall,
-swim, or damage state. This limitation predates the Feather and is not hidden
-by the visual elevation.
+The ROM tile-type decoder and ordinary enemy/projectile Z-contact gate are now
+implemented and documented in
+[`link-tile-types-and-z-contact.md`](link-tile-types-and-z-contact.md). Until
+the next reaction-state slice, special terrain reports the correct landing
+type but does not yet trigger retail fall, swim, or damage state.
 
 ## Verification
 

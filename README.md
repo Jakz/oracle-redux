@@ -111,6 +111,8 @@ The scaffold currently contains:
 - persistent room-flag tile substitutions decoded from both cartridges;
 - cartridge-native per-metatile collision properties, including the original
   bridge, hole, track, and stair shape rules;
+- separate cartridge-native Link terrain types, sampled at the original
+  five-pixel foot offset, plus the retail Z gate for enemy/projectile contact;
 - cartridge-native room seams, position-specific warps, screen-edge overrides,
   transition metadata, and season-adjusted destinations;
 - collision-aware diagnostic player movement with wall sliding, anti-tunneling,
@@ -189,8 +191,9 @@ and current fidelity boundary are documented in
 
 After opening the default chest, press `Z` again to exercise the shared
 top-down Roc's Feather path. Link uses the ROM's directional jump poses and
-signed 8.8 retail Z arc while his shadow remains on the ground. The source
-mapping and deferred terrain reactions are documented in
+signed 8.8 retail Z arc while his shadow remains on the ground. The status line
+shows the ROM-derived terrain under Link and records the type on landing. The
+source mapping and deferred terrain reactions are documented in
 [`docs/reverse-engineering/rocs-feather-slice.md`](docs/reverse-engineering/rocs-feather-slice.md).
 
 Launch the first deterministic actor-interaction scenario. The runtime chooses
@@ -351,6 +354,9 @@ The large-room format is documented in
 [`docs/reverse-engineering/large-room-rendering.md`](docs/reverse-engineering/large-room-rendering.md).
 The decoded traversal properties and collision profiles are documented in
 [`docs/reverse-engineering/room-collisions.md`](docs/reverse-engineering/room-collisions.md).
+The separate Link terrain-type tables, foot sample, and Z-aware object contact
+are documented in
+[`docs/reverse-engineering/link-tile-types-and-z-contact.md`](docs/reverse-engineering/link-tile-types-and-z-contact.md).
 Room adjacency, warp records, and graph navigation are documented in
 [`docs/reverse-engineering/room-topology.md`](docs/reverse-engineering/room-topology.md).
 The current player coordinate, collision-body, and seamless traversal model is

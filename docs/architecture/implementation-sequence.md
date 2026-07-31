@@ -137,9 +137,14 @@ physics, campaign-relocated jump frames, ground-plane landing, and independent
 visual elevation. See
 [`../reverse-engineering/rocs-feather-slice.md`](../reverse-engineering/rocs-feather-slice.md).
 
-Next, close the Feather's tile-type landing reactions and Z-aware contact
-boundary before adding the minimal HUD. This prevents the HUD milestone from
-masking the older hole, water, and lava behavior gap.
+The runtime now decodes the separate ROM `tileTypesTable`, samples the active
+terrain at Link Y+5, reports Feather landing type, and applies retail's
+six-versus-seven-pixel Z gate to ordinary enemy/projectile contact. See
+[`../reverse-engineering/link-tile-types-and-z-contact.md`](../reverse-engineering/link-tile-types-and-z-contact.md).
+
+Next, consume that typed terrain boundary in the hole pull/fall/respawn and
+water/lava entry state machines. Keep swimming capability, damage, and respawn
+ownership outside presentation code.
 
 ## Following slices
 

@@ -27,6 +27,7 @@
 #include "oracle/content/room_layout.h"
 #include "oracle/content/room_mutations.h"
 #include "oracle/content/room_pixels.h"
+#include "oracle/content/room_tile_types.h"
 #include "oracle/content/room_topology.h"
 #include "oracle/content/sword_sprite.h"
 #include "oracle/experience_settings.h"
@@ -34,6 +35,7 @@
 #include "oracle/gameplay/chest_runtime.h"
 #include "oracle/gameplay/feather_runtime.h"
 #include "oracle/gameplay/interaction_target.h"
+#include "oracle/gameplay/object_contact.h"
 #include "oracle/gameplay/octorok_runtime.h"
 #include "oracle/gameplay/player_traversal.h"
 #include "oracle/gameplay/room_actor_loader.h"
@@ -573,6 +575,93 @@ void test_feather_runtime() {
     check(
         slot_rejected.rejected && !slot_rejected.in_air,
         "occupied original parent slot prevents feather activation");
+}
+
+void test_room_tile_types(
+    const std::filesystem::path& path,
+    const oracle::core::Campaign campaign) {
+    using oracle::content::LinkTileType;
+    using oracle::content::RoomLayout;
+    using oracle::content::RoomTileTypeDecoder;
+    using oracle::content::RoomTileTypeMap;
+    using oracle::content::TilesetDescriptor;
+    using oracle::core::WorldRoomId;
+
+    const auto rom = oracle::content::RomSource::load(path);
+    const RoomTileTypeDecoder decoder{rom};
+    const auto overworld = decoder.decode_collision_mode_table(0);
+    check(
+        overworld[0xf3] == LinkTileType::hole,
+        "ROM overworld tile-type table identifies holes");
+    check(
+        overworld[campaign == oracle::core::Campaign::ages
+                ? 0xfa
+                : 0xfd] == LinkTileType::water,
+        "campaign ROM tile-type table identifies water");
+    check(
+        overworld[campaign == oracle::core::Campaign::ages
+                ? 0xe4
+                : 0x7b] == LinkTileType::lava,
+        "campaign ROM tile-type table identifies lava");
+
+    const RoomLayout room{
+        .id = WorldRoomId{.area = 0, .room = 0x22},
+        .columns = 3,
+        .rows = 1,
+        .metatiles = {
+            0xf3,
+            campaign == oracle::core::Campaign::ages
+                ? std::uint8_t{0xfa}
+                : std::uint8_t{0xfd},
+            campaign == oracle::core::Campaign::ages
+                ? std::uint8_t{0xe4}
+                : std::uint8_t{0x7b},
+        },
+    };
+    const auto decoded = decoder.decode(
+        room,
+        TilesetDescriptor{.collision_mode = 0});
+    check(
+        decoded.at(0, 0) == LinkTileType::hole &&
+            decoded.at(1, 0) == LinkTileType::water &&
+            decoded.at(2, 0) == LinkTileType::lava,
+        "room metatiles decode through their active collision-mode table");
+
+    const RoomTileTypeMap foot_sample{
+        .id = room.id,
+        .columns = 1,
+        .rows = 2,
+        .values = {LinkTileType::normal, LinkTileType::hole},
+    };
+    check(
+        RoomTileTypeDecoder::sample_link_feet(
+            foot_sample,
+            8.0,
+            10.0) == LinkTileType::normal,
+        "active tile remains above the five-pixel foot boundary");
+    check(
+        RoomTileTypeDecoder::sample_link_feet(
+            foot_sample,
+            8.0,
+            11.0) == LinkTileType::hole,
+        "active tile crosses at Link's original five-pixel foot sample");
+}
+
+void test_object_z_contact() {
+    using oracle::gameplay::object_z_contact;
+
+    check(
+        object_z_contact(-0x0600, 0),
+        "object contact accepts a six-pixel Z separation");
+    check(
+        !object_z_contact(-0x0700, 0),
+        "object contact rejects the retail seven-pixel Z boundary");
+    check(
+        !object_z_contact(-0x0601, 0),
+        "signed 8.8 contact uses the original high byte for negatives");
+    check(
+        object_z_contact(-0x0001, 0),
+        "fractional negative Z retains signed high-byte semantics");
 }
 
 void test_sword_rom_scenario(
@@ -1148,6 +1237,46 @@ std::optional<std::uint64_t> test_octorok_rom_scenario(
         impact_actors.active_count(ActorCategory::part) == 0,
         "projectile releases its part slot after the 32-tick bounce");
     clear_room.values[1 * 10 + 2] = 0;
+
+    ActorSlotDomain airborne_projectile_actors;
+    const auto airborne_handle =
+        airborne_projectile_actors.allocate_dynamic(
+            ActorCategory::part,
+            oracle::core::ActorIdentity{
+                .id = 0x18,
+                .parameter = 0x08,
+            },
+            scenario.room,
+            40,
+            40,
+            true,
+            false,
+            0);
+    OctorokRuntime airborne_projectile_runtime{rom};
+    PlayerCombatState airborne_combat;
+    const auto airborne_target = PlayerState{
+        .room = scenario.room,
+        .local_x = 42.0,
+        .local_y = 40.0,
+        .z_subpixels = -0x0700,
+        .in_air = 2,
+    };
+    (void)airborne_projectile_runtime.update(
+        airborne_target,
+        airborne_combat,
+        airborne_projectile_actors,
+        collision_lookup);
+    const auto airborne_contact =
+        airborne_projectile_runtime.update(
+            airborne_target,
+            airborne_combat,
+            airborne_projectile_actors,
+            collision_lookup);
+    check(
+        airborne_handle.has_value() &&
+            airborne_contact.projectile_contacts == 0 &&
+            airborne_combat.health == airborne_combat.maximum_health,
+        "projectile passes below Link at retail's seven-pixel Z boundary");
 
     ActorSlotDomain projectile_contact_actors;
     const auto contact_handle =
@@ -2366,6 +2495,13 @@ int main() {
     test_spatial_room_seams();
     test_player_traversal();
     test_feather_runtime();
+    test_object_z_contact();
+    test_room_tile_types(
+        "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",
+        oracle::core::Campaign::ages);
+    test_room_tile_types(
+        "roms/Legend of Zelda, The - Oracle of Seasons (USA).gbc",
+        oracle::core::Campaign::seasons);
     test_link_sprite_facing(
         "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",
         oracle::core::Campaign::ages);

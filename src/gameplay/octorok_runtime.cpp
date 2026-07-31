@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "oracle/content/room_layout.h"
+#include "oracle/gameplay/object_contact.h"
 
 namespace oracle::gameplay {
 namespace {
@@ -92,7 +93,9 @@ double room_world_y(
 bool overlaps_player(
     const core::ActorSlotState& actor,
     const PlayerState& player) noexcept {
-    if (!shares_actor_space(actor.room, player.room)) {
+    if (
+        !shares_actor_space(actor.room, player.room) ||
+        !object_z_contact(player.z_subpixels, 0)) {
         return false;
     }
     constexpr double link_collision_radius = 6.0;

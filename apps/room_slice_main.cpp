@@ -32,6 +32,7 @@
 #include "oracle/content/room_mutations.h"
 #include "oracle/content/room_objects.h"
 #include "oracle/content/room_pixels.h"
+#include "oracle/content/room_tile_types.h"
 #include "oracle/content/room_topology.h"
 #include "oracle/content/sword_sprite.h"
 #include "oracle/core/campaign.h"
@@ -2252,11 +2253,44 @@ int run_window(
     oracle::gameplay::SwordRuntime sword_runtime;
     oracle::gameplay::FeatherRuntime feather_runtime{
         rom.metadata().campaign};
+    const oracle::content::RoomTileTypeDecoder tile_type_decoder{rom};
+    const auto decode_room_tile_types = [&]() {
+        std::vector<oracle::content::RoomTileTypeMap> result;
+        result.reserve(rooms.size());
+        for (const auto& placement : rooms) {
+            const auto tileset = pixel_decoder.describe_tileset(
+                static_cast<std::uint8_t>(placement.layout.id.area),
+                static_cast<std::uint8_t>(placement.layout.id.room),
+                season);
+            result.push_back(
+                tile_type_decoder.decode(placement.layout, tileset));
+        }
+        return result;
+    };
+    auto room_tile_types = decode_room_tile_types();
+    const auto active_link_tile_type = [&]()
+        -> std::optional<oracle::content::LinkTileType> {
+        const auto found = std::find_if(
+            room_tile_types.begin(),
+            room_tile_types.end(),
+            [&](const oracle::content::RoomTileTypeMap& map) {
+                return map.id == current_player.room;
+            });
+        if (found == room_tile_types.end()) {
+            return std::nullopt;
+        }
+        return oracle::content::RoomTileTypeDecoder::sample_link_feet(
+            *found,
+            current_player.local_x,
+            current_player.local_y);
+    };
     oracle::gameplay::PlayerCombatState player_combat;
     oracle::gameplay::OctorokStepReport last_combat_step;
     oracle::gameplay::ChestStepReport last_chest_step;
     oracle::gameplay::SwordStepReport last_sword_step;
     oracle::gameplay::FeatherStepReport last_feather_step;
+    std::optional<oracle::content::LinkTileType>
+        last_feather_landing_type;
     oracle::input::SemanticInputSampler semantic_input;
     std::uint8_t current_tileset_flags =
         pixel_decoder.describe_tileset(
@@ -2332,6 +2366,15 @@ int run_window(
             if (collision != collisions.end()) {
                 *collision = collision_decoder.decode(room->layout, tileset);
             }
+            const auto tile_types = std::find_if(
+                room_tile_types.begin(),
+                room_tile_types.end(),
+                [room_id](const oracle::content::RoomTileTypeMap& map) {
+                    return map.id == room_id;
+                });
+            if (tile_types != room_tile_types.end()) {
+                *tile_types = tile_type_decoder.decode(room->layout, tileset);
+            }
             if (!authentic_region.has_value() || region_texture == nullptr) {
                 return;
             }
@@ -2390,6 +2433,7 @@ int run_window(
                 force_diagnostic);
             rooms = std::move(loaded.rooms);
             collisions = std::move(loaded.collisions);
+            room_tile_types = decode_room_tile_types();
             authentic_region = std::move(loaded.authentic_region);
             large_room_mode = loaded.large_room_mode;
             seed_chest_room_flags();
@@ -2503,6 +2547,7 @@ int run_window(
                     collisions = *chest_reset_collisions;
                     authentic_region = chest_reset_region;
                     initial_player = *chest_reset_player;
+                    room_tile_types = decode_room_tile_types();
                     rebuild_region_texture();
                 }
                 if (
@@ -2543,6 +2588,7 @@ int run_window(
                     oracle::gameplay::SwordStepReport{};
                 last_feather_step =
                     oracle::gameplay::FeatherStepReport{};
+                last_feather_landing_type.reset();
             } else if (
                 event.type == SDL_EVENT_KEY_DOWN &&
                 event.key.key == SDLK_F1 &&
@@ -2618,6 +2664,10 @@ int run_window(
                     current_player,
                     current_actors,
                     side_scrolling);
+                if (last_feather_step.landed) {
+                    last_feather_landing_type =
+                        active_link_tile_type();
+                }
                 last_sword_step = sword_runtime.update(
                     gameplay_input,
                     current_player,
@@ -3131,6 +3181,10 @@ int run_window(
                 << last_feather_step.visual_elevation << "px";
         } else if (last_feather_step.rejected) {
             diagnostic_line << " | feather unavailable here";
+        } else if (last_feather_landing_type.has_value()) {
+            diagnostic_line << " | landed on "
+                << oracle::content::link_tile_type_name(
+                       *last_feather_landing_type);
         }
         if (
             last_combat_step.enemies_hit != 0 ||
@@ -3155,6 +3209,7 @@ int run_window(
         }
         std::ostringstream status_line;
         if (player_mode) {
+            const auto active_type = active_link_tile_type();
             status_line
                 << "room " << std::hex << std::setw(2)
                 << std::setfill('0')
@@ -3165,6 +3220,12 @@ int run_window(
                 << static_cast<unsigned int>(
                        oracle::gameplay::PlayerTraversal::
                            packed_room_position(current_player));
+            status_line
+                << "  tile "
+                << (
+                    active_type.has_value()
+                    ? oracle::content::link_tile_type_name(*active_type)
+                    : std::string_view{"outside-room"});
             if (last_warp.has_value()) {
                 status_line
                     << "  last warp "
