@@ -53,6 +53,13 @@ The global mapping lookup is in bank `0x18` for Ages and bank `0x17` for
 Seasons. Its first two words point to the shared tile-index and tile-attribute
 arrays; 3-byte mapping records pack a 12-bit offset for each array.
 
+Oracle backgrounds use the Game Boy Color LCD controller's signed tile-data
+selection at `$8800`. Tile IDs `$80` through `$ff` address `$8800` through
+`$8ff0`, while IDs `$00` through `$7f` address `$9000` through `$97f0`.
+Treating those IDs as an unsigned `$8000` table reads an unpopulated VRAM
+range and produces large single-color squares. Sprite tile addressing remains
+separate and is not changed by this background rule.
+
 Seasons tilesets `0x00` through `0x1a` are seasonal indirections. Their first
 record byte is `0xff`, followed by a bank-4 pointer to four ordinary 8-byte
 descriptors in spring, summer, autumn, winter order.
@@ -77,7 +84,8 @@ Implemented:
 - all four Seasons descriptor variants;
 - main and unique background graphics;
 - startup background palette plus tileset palette overrides;
-- cartridge-native animation initialization, countdowns, frames, and loops;
+- cartridge-native animation initialization, countdowns, DMA queue, persistent
+  VRAM writes, frames, and loops;
 - deterministic animation selection from a 60 Hz logic tick;
 - standard persistent room-flag tile substitutions for flags 0, 1, 2, 3,
   and 7;
@@ -99,10 +107,22 @@ Not yet applied:
 The animation decoder treats the first sequence byte as the initial countdown,
 then reads alternating graphics-header indices and countdowns. A countdown of
 `0xff` is followed by the low byte of the original signed backward jump. Ages
-performs the original three initialization advances; Seasons performs one.
-Later ticks decrement the unsigned countdown and advance on zero. The viewer
-recomposes and uploads the visible region only when its aggregate animation
-signature changes.
+performs the original three forced initialization advances; Seasons performs
+one. Every graphics header loaded during initialization remains resident in
+emulated VRAM.
+
+Later ticks first apply one pending animation-queue entry, then decrement all
+enabled sequence counters and enqueue indices that reach zero. This persistence
+is required by the Ages waterfall: its sequence updates several different VRAM
+destinations over staggered ticks, so selecting only the latest graphics index
+produces an incomplete cycle. Cycle detection accelerates large deterministic
+`--tick` values only after both the control state and its resident overwrite
+pattern have stabilized. At runtime, only visible rooms whose resident
+animation signature changed are recomposed and uploaded.
+
+`--describe` reports `tileset_animation_group` and
+`room_animation_signature` for the selected room. These make individual ROM
+animation states testable without storing copyrighted frame images.
 
 These omissions are explicit layers, not baked visual approximations. The room
 mutation stages and the boundary for the next implementation are recorded in

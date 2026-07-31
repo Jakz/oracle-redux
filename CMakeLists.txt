@@ -39,6 +39,7 @@ target_link_libraries(oracle_core PUBLIC oracle_experience)
 add_library(oracle_content
     src/content/enemy_data.cpp
     src/content/enemy_sprite.cpp
+    src/content/game_boy_tiles.cpp
     src/content/interaction_sprite.cpp
     src/content/link_sprite.cpp
     src/content/part_data.cpp

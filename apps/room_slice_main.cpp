@@ -1744,6 +1744,12 @@ void print_description(
                 << '\n'
                 << "palette_header=" << std::setw(2)
                 << static_cast<unsigned int>(center->tileset.palette)
+                << '\n'
+                << "tileset_animation_group=" << std::setw(2)
+                << static_cast<unsigned int>(center->tileset.animation)
+                << '\n'
+                << "room_animation_signature=" << std::setw(16)
+                << center->animation_signature
                 << std::dec << '\n';
         }
     }

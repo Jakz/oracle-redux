@@ -1,11 +1,16 @@
 #include "oracle/content/room_pixels.h"
 
+#include "oracle/content/game_boy_tiles.h"
+
 #include <algorithm>
 #include <array>
+#include <deque>
 #include <limits>
+#include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
+#include <vector>
 
 namespace oracle::content {
 namespace {
@@ -35,7 +40,6 @@ constexpr std::size_t seasons_animation_graphics_headers = 0x11a48;
 constexpr std::size_t tileset_record_size = 8;
 constexpr std::size_t graphics_header_entry_size = 6;
 constexpr std::size_t vram_size = 0x2000;
-constexpr std::size_t tile_bytes = 16;
 constexpr std::size_t metatile_count = 256;
 constexpr std::uint64_t signature_offset_basis = 14695981039346656037ull;
 constexpr std::uint64_t signature_prime = 1099511628211ull;
@@ -67,6 +71,8 @@ struct AnimationSequenceState {
 
 using MetatileMappings = std::array<MetatileMapping, metatile_count>;
 using Vram = std::array<std::array<std::uint8_t, vram_size>, 2>;
+using AnimationResidency =
+    std::array<std::array<std::uint16_t, vram_size>, 2>;
 using BackgroundPalettes =
     std::array<std::array<RgbaPixel, 4>, 8>;
 
@@ -359,52 +365,83 @@ void advance_animation_sequence(
     state.counter = rom.read_byte(state.pointer++);
 }
 
-std::uint64_t animation_state_key(
-    const AnimationSequenceState state) {
-    return
-        (static_cast<std::uint64_t>(state.pointer) << 16u) |
-        (static_cast<std::uint64_t>(state.counter) << 8u) |
-        state.graphics_index;
+using AnimationSlots =
+    std::array<std::optional<AnimationSequenceState>, 4>;
+
+std::vector<std::uint64_t> animation_control_key(
+    const AnimationSlots& slots,
+    const std::deque<std::uint8_t>& queue) {
+    std::vector<std::uint64_t> key;
+    key.reserve(slots.size() * 4 + queue.size() + 1);
+    for (const auto& slot : slots) {
+        key.push_back(slot.has_value() ? 1 : 0);
+        key.push_back(slot.has_value() ? slot->counter : 0);
+        key.push_back(slot.has_value() ? slot->pointer : 0);
+        key.push_back(slot.has_value() ? slot->graphics_index : 0);
+    }
+    key.push_back(queue.size());
+    for (const auto graphics_index : queue) {
+        key.push_back(graphics_index);
+    }
+    return key;
 }
 
-std::uint8_t animation_graphics_at_tick(
+void apply_animation_graphics(
     const RomSource& rom,
-    const std::size_t sequence,
-    const core::Campaign campaign,
-    std::uint64_t tick) {
-    AnimationSequenceState state{
-        .counter = rom.read_byte(sequence),
-        .pointer = sequence + 1,
-    };
-    const auto startup_advances =
-        campaign == core::Campaign::ages ? 3 : 1;
-    for (int advance = 0; advance < startup_advances; ++advance) {
-        advance_animation_sequence(rom, state);
+    const CampaignOffsets offsets,
+    const std::uint8_t graphics_index,
+    AnimationResidency& residency,
+    Vram* vram) {
+    const auto entry =
+        offsets.animation_graphics_headers +
+        static_cast<std::size_t>(graphics_index) *
+            graphics_header_entry_size;
+    const auto source_address = read_big_u16(rom, entry + 1);
+    const auto encoded_destination = read_big_u16(rom, entry + 3);
+    const auto destination_bank =
+        static_cast<std::size_t>(encoded_destination & 0x000f);
+    const auto destination =
+        static_cast<std::uint16_t>(encoded_destination & 0xfff0);
+    const auto output_size =
+        (static_cast<std::size_t>(rom.read_byte(entry + 5) & 0x7f) + 1) *
+        16;
+    if (
+        source_address < 0x4000 || source_address >= 0x8000 ||
+        destination < 0x8000 || destination >= 0xa000 ||
+        destination_bank >= residency.size()) {
+        return;
     }
-
-    std::unordered_map<std::uint64_t, std::uint64_t> seen;
-    std::uint64_t elapsed = 0;
-    while (elapsed < tick) {
-        const auto [position, inserted] =
-            seen.emplace(animation_state_key(state), elapsed);
-        if (!inserted) {
-            const auto cycle_length = elapsed - position->second;
-            if (cycle_length != 0) {
-                const auto cycles = (tick - elapsed) / cycle_length;
-                if (cycles != 0) {
-                    elapsed += cycles * cycle_length;
-                    continue;
-                }
-            }
-        }
-
-        state.counter = static_cast<std::uint8_t>(state.counter - 1);
-        if (state.counter == 0) {
-            advance_animation_sequence(rom, state);
-        }
-        ++elapsed;
+    const auto destination_offset =
+        static_cast<std::size_t>(destination - 0x8000);
+    if (destination_offset + output_size > vram_size) {
+        throw std::runtime_error{
+            "animation graphics write beyond emulated VRAM"};
     }
-    return state.graphics_index;
+    const auto residency_value = static_cast<std::uint16_t>(
+        static_cast<unsigned int>(graphics_index) + 1u);
+    std::fill_n(
+        residency[destination_bank].begin() +
+            static_cast<std::ptrdiff_t>(destination_offset),
+        output_size,
+        residency_value);
+    if (vram != nullptr) {
+        load_graphics_entry(rom, entry, *vram);
+    }
+}
+
+std::uint64_t animation_residency_signature(
+    const AnimationResidency& residency) {
+    auto signature = signature_offset_basis;
+    for (const auto& bank : residency) {
+        for (const auto graphics : bank) {
+            signature ^= static_cast<std::uint8_t>(graphics);
+            signature *= signature_prime;
+            signature ^=
+                static_cast<std::uint8_t>(graphics >> 8u);
+            signature *= signature_prime;
+        }
+    }
+    return signature;
 }
 
 std::uint64_t collect_animation_frames(
@@ -422,35 +459,101 @@ std::uint64_t collect_animation_frames(
             rom.read_little_u16(
                 offsets.animation_group_table +
                 static_cast<std::size_t>(group_index) * 2));
-    const auto state = rom.read_byte(group);
-    auto signature = signature_offset_basis;
+    const auto enabled_slots = rom.read_byte(group);
+    AnimationSlots slots;
     for (std::size_t slot = 0; slot < 4; ++slot) {
-        if ((state & (1u << slot)) == 0) {
+        if ((enabled_slots & (1u << slot)) == 0) {
             continue;
         }
-        const auto animation =
+        const auto sequence =
             rom.banked_file_offset(
                 4,
                 rom.read_little_u16(group + 1 + slot * 2));
-        const auto graphics_index =
-            animation_graphics_at_tick(
-                rom,
-                animation,
-                rom.metadata().campaign,
-                animation_tick);
-        signature ^= static_cast<std::uint8_t>(slot);
-        signature *= signature_prime;
-        signature ^= graphics_index;
-        signature *= signature_prime;
-        if (vram != nullptr) {
-            const auto graphics_entry =
-                offsets.animation_graphics_headers +
-                static_cast<std::size_t>(graphics_index) *
-                    graphics_header_entry_size;
-            load_graphics_entry(rom, graphics_entry, *vram);
+        slots[slot] = AnimationSequenceState{
+            .counter = rom.read_byte(sequence),
+            .pointer = sequence + 1,
+        };
+    }
+
+    AnimationResidency residency{};
+    std::deque<std::uint8_t> queue;
+    const auto update_sequences = [&](const bool force) {
+        for (auto& slot : slots) {
+            if (!slot.has_value()) {
+                continue;
+            }
+            if (!force) {
+                slot->counter =
+                    static_cast<std::uint8_t>(slot->counter - 1);
+                if (slot->counter != 0) {
+                    continue;
+                }
+            }
+            advance_animation_sequence(rom, *slot);
+            if (queue.size() >= 31) {
+                throw std::runtime_error{
+                    "tileset animation queue overflowed"};
+            }
+            queue.push_back(slot->graphics_index);
+        }
+    };
+    const auto load_next_queued = [&]() {
+        if (queue.empty()) {
+            return false;
+        }
+        const auto graphics_index = queue.front();
+        queue.pop_front();
+        apply_animation_graphics(
+            rom,
+            offsets,
+            graphics_index,
+            residency,
+            vram);
+        return true;
+    };
+
+    const auto startup_updates =
+        rom.metadata().campaign == core::Campaign::ages ? 3 : 1;
+    for (int update = 0; update < startup_updates; ++update) {
+        update_sequences(true);
+        while (load_next_queued()) {
         }
     }
-    return signature;
+
+    struct RepeatPoint {
+        std::uint64_t elapsed{};
+        bool residency_stable{};
+    };
+    std::map<std::vector<std::uint64_t>, RepeatPoint> seen;
+    std::uint64_t elapsed = 0;
+    while (elapsed < animation_tick) {
+        const auto key = animation_control_key(slots, queue);
+        const auto [position, inserted] = seen.emplace(
+            key,
+            RepeatPoint{.elapsed = elapsed});
+        if (!inserted) {
+            const auto cycle_length =
+                elapsed - position->second.elapsed;
+            if (
+                position->second.residency_stable &&
+                cycle_length != 0) {
+                const auto cycles =
+                    (animation_tick - elapsed) / cycle_length;
+                if (cycles != 0) {
+                    elapsed += cycles * cycle_length;
+                    continue;
+                }
+            } else {
+                position->second.elapsed = elapsed;
+                position->second.residency_stable = true;
+            }
+        }
+
+        load_next_queued();
+        update_sequences(false);
+        ++elapsed;
+    }
+    return animation_residency_signature(residency);
 }
 
 std::vector<std::uint8_t> unique_palette_overrides(
@@ -551,7 +654,7 @@ std::uint8_t tile_color_index(
     }
     const auto bank = static_cast<std::size_t>((attribute >> 3u) & 1u);
     const auto tile_offset =
-        static_cast<std::size_t>(tile) * tile_bytes + y * 2;
+        signed_background_tile_offset(tile) + y * 2;
     const auto low = vram[bank][tile_offset];
     const auto high = vram[bank][tile_offset + 1];
     const auto bit = static_cast<std::uint8_t>(7u - x);

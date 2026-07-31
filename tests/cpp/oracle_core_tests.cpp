@@ -16,6 +16,7 @@
 #include "oracle/content/part_sprite.h"
 #include "oracle/content/enemy_data.h"
 #include "oracle/content/enemy_sprite.h"
+#include "oracle/content/game_boy_tiles.h"
 #include "oracle/content/rom_source.h"
 #include "oracle/content/rom_text.h"
 #include "oracle/content/room_objects.h"
@@ -1604,6 +1605,14 @@ void test_room_layout_decompression() {
 
 void test_graphics_decompression() {
     using oracle::content::RoomPixelDecoder;
+    using oracle::content::signed_background_tile_offset;
+
+    check(
+        signed_background_tile_offset(0x00) == 0x1000 &&
+            signed_background_tile_offset(0x7f) == 0x17f0 &&
+            signed_background_tile_offset(0x80) == 0x0800 &&
+            signed_background_tile_offset(0xff) == 0x0ff0,
+        "background tile indices use the cartridge's signed $8800 mode");
 
     const std::array<std::uint8_t, 5> raw{1, 2, 3, 4, 5};
     check(
@@ -1652,6 +1661,45 @@ void test_graphics_decompression() {
             2) ==
             std::vector<std::uint8_t>(16, 0x7a),
         "graphics mode two expands its repeated-byte mask");
+}
+
+void test_room_animation_dma_state(
+    const std::filesystem::path& path,
+    const oracle::core::Campaign campaign) {
+    if (!std::filesystem::exists(path)) {
+        return;
+    }
+    using oracle::content::RomSource;
+    using oracle::content::RoomPixelDecoder;
+
+    const auto rom = RomSource::load(path);
+    check(
+        rom.metadata().campaign == campaign,
+        "room animation ROM campaign matches");
+    const RoomPixelDecoder decoder{rom};
+    if (campaign == oracle::core::Campaign::ages) {
+        check(
+            decoder.animation_signature(0x00, 0) ==
+                    0x0b6012fd2cb74525ull &&
+                decoder.animation_signature(0x00, 3) ==
+                    0x0b6012fd2cb74525ull &&
+                decoder.animation_signature(0x00, 4) ==
+                    0x16a08e6de83dcca5ull &&
+                decoder.animation_signature(0x00, 5) ==
+                    0x515283522a872fa5ull,
+            "Ages waterfall preserves staggered initialization and DMA writes");
+        return;
+    }
+    check(
+        decoder.animation_signature(0x00, 0) ==
+                0xfa05832ccf2611a5ull &&
+            decoder.animation_signature(0x00, 15) ==
+                0xfa05832ccf2611a5ull &&
+            decoder.animation_signature(0x00, 16) ==
+                0x9bd1ba50baeda0a5ull &&
+            decoder.animation_signature(0x00, 17) ==
+                0xd517fa6e68d62825ull,
+        "Seasons animation queue applies simultaneous updates one per tick");
 }
 
 void test_room_tile_replacements() {
@@ -1968,6 +2016,12 @@ int main() {
     test_experience_profiles();
     test_room_layout_decompression();
     test_graphics_decompression();
+    test_room_animation_dma_state(
+        "roms/Legend of Zelda, The - Oracle of Ages (USA).gbc",
+        oracle::core::Campaign::ages);
+    test_room_animation_dma_state(
+        "roms/Legend of Zelda, The - Oracle of Seasons (USA).gbc",
+        oracle::core::Campaign::seasons);
     test_room_tile_replacements();
     test_room_collision_shapes();
     test_spatial_room_seams();
